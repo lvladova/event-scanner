@@ -1,0 +1,1039 @@
+import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
+
+import 'config.dart';
+import 'services/vision_api_service.dart';
+import 'services/event_parser.dart';
+import 'services/natural_language_service.dart';
+import 'features/event_scanner/domain/event_model.dart';
+import 'screens/event_details_screen.dart';
+import 'services/calendar_service.dart';
+import 'screens/image_preview.dart';
+import 'screens/settings_screen.dart';
+
+import 'package:flutter/material.dart';
+import 'theme/futuristic_theme.dart';
+import 'widgets/futuristic_background.dart';
+import 'widgets/futuristic_animations.dart';
+import 'widgets/futuristic_widgets.dart';
+
+void main() {
+  CalendarService.initializeTimeZones();
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Event Scanner',
+      debugShowCheckedModeBanner: false,
+      theme: FuturisticTheme.darkTheme,
+      home: FuturisticBackground(
+        child: const ImageUploadPage(),
+      ),
+    );
+  }
+}
+
+class ImageUploadPage extends StatefulWidget {
+  const ImageUploadPage({super.key});
+
+  @override
+  State<ImageUploadPage> createState() => _ImageUploadPageState();
+}
+
+class _ImageUploadPageState extends State<ImageUploadPage> {
+  File? _image;
+  final ImagePicker _picker = ImagePicker();
+  String _ocrText = '';
+  EventModel? _eventDetails;
+  bool _isLoading = false;
+  bool _ocrCompleted = false;
+  bool _isScheduling = false;
+
+  Future<void> _pickImage() async {
+    HapticFeedback.lightImpact();
+
+    final XFile? pickedFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+    );
+
+    if (pickedFile != null) {
+      setState(() {
+        _image = File(pickedFile.path);
+        _isLoading = true;
+      });
+      _performOCR();
+    }
+  }
+
+  Future<void> _takePhoto() async {
+    final XFile? pickedFile = await _picker.pickImage(
+      source: ImageSource.camera,
+    );
+
+    if (pickedFile != null) {
+      setState(() {
+        _image = File(pickedFile.path);
+        _isLoading = true;
+      });
+      _performOCR();
+    }
+  }
+
+
+  Future<void> _performOCR() async {
+    if (_image == null) return;
+
+    setState(() {
+      _isLoading = true;
+      _ocrCompleted = false;
+    });
+
+    try {
+      // Step 1: Extract raw text from the image using Google Cloud Vision
+      final text = await extractTextFromImage(_image!, Config.visionApiKey);
+
+      // Check if we got meaningful text
+      if (text.isEmpty || text == "No text found in image" || text == "No text found") {
+        setState(() {
+          _isLoading = false;
+          _ocrText = "No text detected in the image. The image may be too dark or blurry.";
+        });
+
+        _showRetryDialog();
+        return;
+      }
+
+      // Save the raw OCR text
+      setState(() {
+        _ocrText = text;
+      });
+
+      // Step 2: Process the text to extract event details
+      EventModel eventDetails;
+
+      // Use Natural Language API if enabled in config
+      if (Config.useNaturalLanguageAPI) {
+        try {
+          eventDetails = await NaturalLanguageService.extractEventEntities(text, Config.visionApiKey);
+        } catch (nlpError) {
+          print('NLP processing failed: $nlpError');
+          // Fallback to traditional parsing
+          eventDetails = EventParser.parseEventDetails(text);
+        }
+      } else {
+        // Use traditional parsing method
+        eventDetails = EventParser.parseEventDetails(text);
+      }
+
+      setState(() {
+        _eventDetails = eventDetails;
+        _ocrCompleted = true;
+      });
+    } catch (e) {
+      setState(() {
+        _ocrText = 'Error: $e';
+      });
+
+      // Show retry dialog
+      _showRetryDialog();
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _showRetryDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2C),
+        title: const Text('OCR Failed'),
+        content: const Text('Unable to extract text from the image. Would you like to try again or enter event details manually?'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // Offer to create a blank event
+              _createBlankEvent();
+            },
+            child: const Text('Enter Manually'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _performOCR();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _createBlankEvent() {
+    setState(() {
+      _eventDetails = EventModel(
+        title: "New Event",
+        date: DateTime.now(),
+        time: TimeOfDay.now(),
+        location: "Location TBD",
+        description: "",
+      );
+      _ocrCompleted = true;
+    });
+
+    // Immediately navigate to edit screen
+    _navigateToEventDetails();
+  }
+
+  void _navigateToEventDetails() {
+    if (_eventDetails == null) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EventDetailsScreen(
+          event: _eventDetails!,
+          onSave: (updatedEvent) {
+            setState(() {
+              _eventDetails = updatedEvent;
+            });
+            // Here you would integrate with calendar API
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Event saved successfully!')),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _scheduleEvent() async {
+    if (_eventDetails == null) return;
+
+    // Validate event data
+    if (_eventDetails!.date == null || _eventDetails!.time == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please set both date and time for the event'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    HapticFeedback.mediumImpact();
+    setState(() => _isScheduling = true);
+
+    try {
+      // Call calendar service to create event
+      final createdEvent = await CalendarService.createCalendarEvent(_eventDetails!);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Event "${_eventDetails!.title}" scheduled successfully!'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+
+      // Refresh upcoming events
+      _fetchUpcomingEvents();
+      HapticFeedback.heavyImpact();
+
+    } catch (e) {
+      HapticFeedback.vibrate();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to schedule event: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => _isScheduling = false);
+    }
+  }
+
+  // Class variable
+  List<Map<String, dynamic>> _upcomingEvents = [];
+  bool _loadingEvents = false;
+
+// Method to fetch events
+  Future<void> _fetchUpcomingEvents() async {
+    if (_loadingEvents) return;
+
+    setState(() => _loadingEvents = true);
+
+    try {
+      final events = await CalendarService.getUpcomingEvents();
+      setState(() {
+        _upcomingEvents = events;
+      });
+    } catch (e) {
+      print('Error fetching events: $e');
+    } finally {
+      setState(() => _loadingEvents = false);
+    }
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: FuturisticAnimations.holographicScanner(
+        isScanning: _isLoading,
+        child: Column(
+          children: [
+            // App Bar
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: FuturisticTheme.softBlue,
+                boxShadow: [
+                  BoxShadow(
+                    color: FuturisticTheme.primaryBlue.withOpacity(0.3),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  FuturisticAnimations.pulsingSphere(
+                    size: 50,
+                    color: FuturisticTheme.primaryBlue,
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Event Scanner',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.settings_outlined),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const SettingsScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+            // Main Content
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  // Image Upload Area with futuristic design
+                  FuturisticWidgets.holographicCard(
+                    child: Container(
+                      height: MediaQuery.of(context).size.height * 0.3,
+                      constraints: const BoxConstraints(
+                        minHeight: 200,
+                        maxHeight: 350,
+                      ),
+                      child: _image != null
+                          ? GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => ImagePreviewScreen(image: _image!),
+                            ),
+                          );
+                        },
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Stack(
+                            alignment: Alignment.bottomRight,
+                            children: [
+                              Image.file(_image!, fit: BoxFit.cover, width: double.infinity),
+                              Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black54,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(
+                                    Icons.zoom_in,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                          : Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          FuturisticAnimations.pulsingSphere(
+                            size: 100,
+                            color: FuturisticTheme.primaryBlue,
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Upload Event Image',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              FuturisticWidgets.futuristicButton(
+                                onPressed: _pickImage,
+                                child: const Text('Gallery'),
+                              ),
+                              const SizedBox(width: 16),
+                              FuturisticWidgets.futuristicButton(
+                                onPressed: _takePhoto,
+                                child: const Text('Camera'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // OCR Button & Actions
+                  if (_image != null)
+                    Container(
+                      margin: const EdgeInsets.only(top: 16),
+                      child: Row(
+                        children: [
+                          // Delete Image Button
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: IconButton(
+                              onPressed: () {
+                                setState(() {
+                                  _image = null;
+                                  _ocrText = '';
+                                  _ocrCompleted = false;
+                                  _eventDetails = null;
+                                });
+                              },
+                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                              tooltip: 'Delete image',
+                            ),
+                          ),
+
+                          const SizedBox(width: 12),
+
+                          // Loading indicator (only shown during processing)
+                          if (_isLoading)
+                            Expanded(
+                              child: Container(
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1E1E2C),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Center(
+                                  child: FuturisticAnimations.futuristicLoader(
+                                    color: FuturisticTheme.primaryBlue,
+                                    size: 100,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+
+                  // Event Details Card (shown after OCR processing)
+                  if (_eventDetails != null)
+                    Container(
+                      margin: const EdgeInsets.only(top: 24),
+                      child: FuturisticWidgets.holographicCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Header
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: FuturisticTheme.primaryBlue.withOpacity(0.1),
+                              borderRadius: const BorderRadius.only(
+                                topLeft: Radius.circular(16),
+                                topRight: Radius.circular(16),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.event_note, color: Colors.blue),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  'Event Details',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                                const Spacer(),
+                                TextButton.icon(
+                                  onPressed: _navigateToEventDetails,
+                                  icon: const Icon(Icons.edit, size: 16),
+                                  label: const Text('Edit'),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          // Event Details Content
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Title
+                                Text(
+                                  _eventDetails!.title,
+                                  style: const TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+
+                                // Date and Time Row
+                                LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    if (constraints.maxWidth < 360) {
+                                      // Stack vertically on narrow screens
+                                      return Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          // Date
+                                          Row(
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.all(8),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.blue.withOpacity(0.1),
+                                                  borderRadius: BorderRadius.circular(8),
+                                                ),
+                                                child: const Icon(
+                                                  Icons.calendar_today,
+                                                  color: Colors.blue,
+                                                  size: 20,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    const Text(
+                                                      'Date',
+                                                      style: TextStyle(
+                                                        color: Colors.grey,
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                    Text(
+                                                      _eventDetails!.date != null
+                                                          ? _eventDetails!.formattedDate
+                                                          : 'Date not detected',
+                                                      style: TextStyle(
+                                                        color: _eventDetails!.date != null
+                                                            ? Colors.white
+                                                            : Colors.orange,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+
+                                          const SizedBox(height: 16),
+
+                                          // Time
+                                          Row(
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.all(8),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.blue.withOpacity(0.1),
+                                                  borderRadius: BorderRadius.circular(8),
+                                                ),
+                                                child: const Icon(
+                                                  Icons.access_time,
+                                                  color: Colors.blue,
+                                                  size: 20,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    const Text(
+                                                      'Time',
+                                                      style: TextStyle(
+                                                        color: Colors.grey,
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                    Text(
+                                                      _eventDetails!.time != null
+                                                          ? _eventDetails!.formattedTime
+                                                          : 'Time not detected',
+                                                      style: TextStyle(
+                                                        color: _eventDetails!.time != null
+                                                            ? Colors.white
+                                                            : Colors.orange,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      );
+                                    } else {
+                                      // Side by side on wider screens
+                                      return Row(
+                                        children: [
+                                          // Date
+                                          Expanded(
+                                            child: Row(
+                                              children: [
+                                                Container(
+                                                  padding: const EdgeInsets.all(8),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.blue.withOpacity(0.1),
+                                                    borderRadius: BorderRadius.circular(8),
+                                                  ),
+                                                  child: const Icon(
+                                                    Icons.calendar_today,
+                                                    color: Colors.blue,
+                                                    size: 20,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      const Text(
+                                                        'Date',
+                                                        style: TextStyle(
+                                                          color: Colors.grey,
+                                                          fontSize: 12,
+                                                        ),
+                                                      ),
+                                                      Text(
+                                                        _eventDetails!.date != null
+                                                            ? _eventDetails!.formattedDate
+                                                            : 'Date not detected',
+                                                        style: TextStyle(
+                                                          color: _eventDetails!.date != null
+                                                              ? Colors.white
+                                                              : Colors.orange,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+
+                                          // Time
+                                          Expanded(
+                                            child: Row(
+                                              children: [
+                                                Container(
+                                                  padding: const EdgeInsets.all(8),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.blue.withOpacity(0.1),
+                                                    borderRadius: BorderRadius.circular(8),
+                                                  ),
+                                                  child: const Icon(
+                                                    Icons.access_time,
+                                                    color: Colors.blue,
+                                                    size: 20,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      const Text(
+                                                        'Time',
+                                                        style: TextStyle(
+                                                          color: Colors.grey,
+                                                          fontSize: 12,
+                                                        ),
+                                                      ),
+                                                      Text(
+                                                        _eventDetails!.time != null
+                                                            ? _eventDetails!.formattedTime
+                                                            : 'Time not detected',
+                                                        style: TextStyle(
+                                                          color: _eventDetails!.time != null
+                                                              ? Colors.white
+                                                              : Colors.orange,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    }
+                                  },
+                                ),
+
+                                const SizedBox(height: 16),
+
+                                // Location
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: const Icon(
+                                        Icons.location_on,
+                                        color: Colors.blue,
+                                        size: 20,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'Location',
+                                            style: TextStyle(
+                                              color: Colors.grey,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          Text(_eventDetails!.location),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 24),
+
+                                // Action Buttons
+                                LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    // If width is less than 360, stack buttons vertically
+                                    if (constraints.maxWidth < 360) {
+                                      return Column(
+                                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                                        children: [
+                                          ElevatedButton.icon(
+                                            onPressed: _navigateToEventDetails,
+                                            icon: const Icon(Icons.edit, size: 18),
+                                            label: const Text('Edit Details'),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.blue,
+                                              padding: const EdgeInsets.symmetric(vertical: 12),
+                                              foregroundColor: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          ElevatedButton.icon(
+                                            onPressed: _isScheduling ? null : _scheduleEvent,
+                                            icon: _isScheduling
+                                                ? const SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            )
+                                                : const Icon(Icons.calendar_month, size: 18),
+                                            label: Text(_isScheduling ? 'Scheduling...' : 'Schedule'),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(0xFF22A45D),
+                                              padding: const EdgeInsets.symmetric(vertical: 12),
+                                              foregroundColor: Colors.white,
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    } else {
+                                      // Original row layout for wider screens
+                                      return Row(
+                                        children: [
+                                          Expanded(
+                                            child: ElevatedButton.icon(
+                                              onPressed: _navigateToEventDetails,
+                                              icon: const Icon(Icons.edit),
+                                              label: const Text('Edit Details'),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.blue,
+                                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                                foregroundColor: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: ElevatedButton.icon(
+                                              onPressed: _isScheduling ? null : _scheduleEvent,
+                                              icon: _isScheduling
+                                                  ? const SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: Colors.white,
+                                                ),
+                                              )
+                                                  : const Icon(Icons.calendar_month),
+                                              label: Text(_isScheduling ? 'Scheduling...' : 'Schedule'),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: const Color(0xFF22A45D),
+                                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                                foregroundColor: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          // Footer
+                          if (_ocrText.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.withOpacity(0.1),
+                                borderRadius: const BorderRadius.only(
+                                  bottomLeft: Radius.circular(16),
+                                  bottomRight: Radius.circular(16),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.info_outline, color: Colors.blue, size: 16),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'OCR text extracted successfully',
+                                      style: TextStyle(
+                                        color: Colors.grey[400],
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                  GestureDetector(
+                                    onTap: () {
+                                      showModalBottomSheet(
+                                        context: context,
+                                        backgroundColor: const Color(0xFF1E1E2C),
+                                        builder: (context) {
+                                          return Container(
+                                            padding: const EdgeInsets.all(16),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Text(
+                                                  'Raw OCR Text',
+                                                  style: TextStyle(
+                                                    fontSize: 18,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 8),
+                                                const Divider(),
+                                                const SizedBox(height: 8),
+                                                Expanded(
+                                                  child: SingleChildScrollView(
+                                                    child: Text(_ocrText),
+                                                  ),
+                                                ),
+                                                // Add padding at the bottom to ensure content isn't hidden by system UI
+                                                const SizedBox(height: 16),
+                                                // Add a close button to ensure users can dismiss the sheet
+                                                Center(
+                                                  child: ElevatedButton(
+                                                    onPressed: () => Navigator.of(context).pop(),
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor: Colors.blue,
+                                                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                                      foregroundColor: Colors.white,
+                                                    ),
+                                                    child: const Text('Close'),
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 16),
+                                              ],
+                                            ),
+                                          );
+                                        },
+                                        isScrollControlled: true,
+                                        constraints: BoxConstraints(
+                                          maxHeight: MediaQuery.of(context).size.height * 0.7,
+                                        ),
+                                      );
+                                    },
+                                    child: Text(
+                                      'View Raw Text',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                      ),
+                    ),
+
+                  // Upcoming Events Section
+                  if (_eventDetails != null)
+                    Container(
+                      margin: const EdgeInsets.only(top: 32, bottom: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Text(
+                                'UPCOMING EVENTS',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                              const Spacer(),
+                              IconButton(
+                                icon: const Icon(Icons.refresh, size: 18),
+                                onPressed: _fetchUpcomingEvents,
+                                tooltip: 'Refresh events',
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          _loadingEvents
+                              ? const Center(
+                            child: CircularProgressIndicator(),
+                          )
+                              : _upcomingEvents.isEmpty
+                              ? Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E1E2C),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Center(
+                              child: Text(
+                                'You have no upcoming events',
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            ),
+                          )
+                              : ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: _upcomingEvents.length,
+                            itemBuilder: (context, index) {
+                              final event = _upcomingEvents[index];
+                              final startTime = event['start']?['dateTime'] != null
+                                  ? DateTime.parse(event['start']['dateTime'])
+                                  : null;
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1E1E2C),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: ListTile(
+                                  title: Text(event['summary'] ?? 'Untitled Event'),
+                                  subtitle: Text(
+                                    startTime != null
+                                        ? DateFormat('MMM dd, yyyy • hh:mm a').format(startTime)
+                                        : 'No date specified',
+                                  ),
+                                  leading: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(Icons.event, color: Colors.blue),
+                                  ),
+                                  trailing: IconButton(
+                                    icon: const Icon(Icons.open_in_new, size: 18),
+                                    onPressed: () => CalendarService.openEventInCalendar(event['htmlLink']),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      ),
+    );
+  }
+}
