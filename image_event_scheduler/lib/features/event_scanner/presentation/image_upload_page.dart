@@ -10,11 +10,13 @@ import 'package:image_event_scheduler/screens/settings_screen.dart';
 import 'package:image_event_scheduler/screens/image_preview.dart';
 import 'package:image_event_scheduler/features/event_scanner/domain/services/calendar_service.dart';
 import 'package:image_event_scheduler/features/event_scanner/presentation/event_details_card.dart';
-import 'package:image_event_scheduler/features/event_scanner/presentation/event_list_view.dart';
 import 'package:image_event_scheduler/shared/theme/futuristic_theme.dart';
 import 'package:image_event_scheduler/shared/widgets/futuristic_widgets.dart';
 import 'package:image_event_scheduler/shared/widgets/futuristic_animations.dart';
-import 'package:image_event_scheduler/config.dart';
+import 'package:flutter/services.dart';
+
+import 'widgets/multi_event_detection_modal.dart';
+import 'widgets/detected_events_card.dart';
 
 class ImageUploadPage extends StatefulWidget {
   const ImageUploadPage({Key? key}) : super(key: key);
@@ -26,22 +28,13 @@ class ImageUploadPage extends StatefulWidget {
 class _ImageUploadPageState extends State<ImageUploadPage> {
   File? _image;
   String _ocrText = '';
-  Map<String, dynamic> _structuredData = {};
   List<EventModel> _detectedEvents = [];
-  EventModel? _selectedEvent;
+  List<int> _selectedEventIndices = [];
   bool _isLoading = false;
   bool _ocrCompleted = false;
   bool _isScheduling = false;
   List<Map<String, dynamic>> _upcomingEvents = [];
   bool _loadingEvents = false;
-  bool _multipleEventsDetected = false;
-
-  @override
-  void initState() {
-    super.initState();
-    // Fetch upcoming events on initial load
-    _fetchUpcomingEvents();
-  }
 
   Future<void> _pickImage() async {
     final pickedFile = await ImageHelper.pickImageFromGallery();
@@ -49,10 +42,10 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
       setState(() {
         _image = pickedFile;
         _isLoading = true;
+        // Clear previous results
         _detectedEvents = [];
-        _selectedEvent = null;
-        _multipleEventsDetected = false;
-        _structuredData = {};
+        _selectedEventIndices = [];
+        _ocrText = '';
       });
       _startOCR();
     }
@@ -64,10 +57,10 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
       setState(() {
         _image = pickedFile;
         _isLoading = true;
+        // Clear previous results
         _detectedEvents = [];
-        _selectedEvent = null;
-        _multipleEventsDetected = false;
-        _structuredData = {};
+        _selectedEventIndices = [];
+        _ocrText = '';
       });
       _startOCR();
     }
@@ -82,232 +75,328 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
     });
 
     try {
-      // Use the enhanced processing method that handles structured text
-      final events = await OCRHelper.processEventImage(_image!,
-          detectMultiple: Config.enableMultiEventDetection);
+      // Extract text from image
+      final extractedText = await OCRHelper.extractTextOnly(_image!);
 
-      // Handle the result
+      if (extractedText.isEmpty) {
+        setState(() {
+          _ocrText = "No text detected in the image.";
+          _isLoading = false;
+        });
+        DialogHelper.showRetryDialog(context, _createBlankEvent, _startOCR);
+        return;
+      }
+
+      // Save the raw OCR text
+      setState(() {
+        _ocrText = extractedText;
+      });
+
+      // Try to detect multiple events in the text
+      final events = await _extractMultipleEvents(extractedText);
+
       setState(() {
         _detectedEvents = events;
-        _multipleEventsDetected = events.length > 1;
-        _selectedEvent = events.isNotEmpty ? events.first : null;
         _ocrCompleted = true;
-        _ocrText = events.isNotEmpty ? events.first.description : '';
         _isLoading = false;
       });
 
+      // If multiple events detected, show modal to let user select
       if (events.length > 1) {
-        // Optional: Show multi-event dialog
-        _showMultiEventDialog(events);
-      } else if (events.length == 1 && Config.enableAutoOCR) {
-        // Auto-navigate to event details
-        _navigateToEventDetails();
+        _showMultiEventDetectionModal(events);
+      } else if (events.length == 1) {
+        // With just one event, set it as selected
+        setState(() {
+          _selectedEventIndices = [0];
+        });
+      } else {
+        // No events detected, create blank event
+        _createBlankEvent();
       }
     } catch (e) {
       print('OCR error: $e');
       setState(() {
-        _ocrText = "Error processing image: $e";
+        _ocrText = 'Error: $e';
         _isLoading = false;
       });
       DialogHelper.showRetryDialog(context, _createBlankEvent, _startOCR);
     }
   }
 
-  Future<List<EventModel>> _tryExtractMultipleEvents(String text) async {
-    // This could be expanded to use more sophisticated algorithms
-    // For now, we'll use a simple approach to detect date patterns
+  // Method to extract multiple events from text
+  Future<List<EventModel>> _extractMultipleEvents(String text) async {
+    List<EventModel> events = [];
 
-    final events = <EventModel>[];
+    try {
+      // First try to parse as a single event
+      final singleEvent = await OCRHelper.tryParseEvent(text);
+      if (singleEvent != null) {
+        events.add(singleEvent);
+      }
 
-    // Split by multiple newlines
-    final blocks = text.split(RegExp(r'\n{3,}'));
+      // Split text by sections to find multiple events
+      final paragraphs = text.split('\n\n');
 
-    for (final block in blocks) {
-      if (block.trim().length > 20) { // Minimum text length for an event
-        try {
-          final event = await OCRHelper.tryParseEvent(block);
-          if (event != null) {
-            events.add(event);
+      // Try to detect time ranges which might indicate separate events
+      final timeRangePattern = RegExp(r'\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}');
+      final timeMatches = timeRangePattern.allMatches(text);
+
+      // Extract events from time ranges
+      if (timeMatches.length > 1) {
+        for (var match in timeMatches) {
+          final timeRange = match.group(0)!;
+          final surroundingText = _getTextAroundMatch(text, match.start, match.end, 200);
+
+          // Extract just the start time from the range
+          final startTime = timeRange.split('-')[0].trim();
+
+          // Create event model with this time range
+          final rangeEvent = await OCRHelper.tryParseEvent(surroundingText);
+          if (rangeEvent != null) {
+            // Make sure it's not a duplicate of our main event
+            if (events.isEmpty || !_isSimilarEvent(events[0], rangeEvent)) {
+              events.add(rangeEvent);
+            }
           }
-        } catch (e) {
-          print('Error parsing event block: $e');
         }
+      }
+
+      // Look for address pattern which might indicate an event location
+      final addressPattern = RegExp(r'\d+\s+[A-Za-z]+(?:\s+[A-Za-z]+)*\s+(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Lane|Ln\.?|Drive|Dr\.?|Boulevard|Blvd\.?|Place|Pl\.?)');
+      final addressMatches = addressPattern.allMatches(text);
+
+      if (addressMatches.length > 1) {
+        for (var match in addressMatches) {
+          final address = match.group(0)!;
+          final surroundingText = _getTextAroundMatch(text, match.start, match.end, 200);
+
+          final locationEvent = await OCRHelper.tryParseEvent(surroundingText);
+          if (locationEvent != null) {
+            // Make sure location is set to the address we found
+            locationEvent.location = address;
+
+            // Add if not a duplicate
+            if (!events.any((e) => _isSimilarEvent(e, locationEvent))) {
+              events.add(locationEvent);
+            }
+          }
+        }
+      }
+
+      // Look for date patterns which might indicate separate events
+      final datePattern = RegExp(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?\s+\d{4}\b');
+      final dateMatches = datePattern.allMatches(text);
+
+      if (dateMatches.length > 1) {
+        for (var match in dateMatches) {
+          final date = match.group(0)!;
+          final surroundingText = _getTextAroundMatch(text, match.start, match.end, 200);
+
+          final dateEvent = await OCRHelper.tryParseEvent(surroundingText);
+          if (dateEvent != null && !events.any((e) => _isSimilarEvent(e, dateEvent))) {
+            events.add(dateEvent);
+          }
+        }
+      }
+
+      // Remove duplicates and very similar events
+      events = _removeDuplicateEvents(events);
+
+      // If no events were found, create at least one from the main text
+      if (events.isEmpty) {
+        final defaultEvent = await OCRHelper.tryParseEvent(text);
+        if (defaultEvent != null) {
+          events.add(defaultEvent);
+        } else {
+          // Create blank event as fallback
+          events.add(EventHelper.createBlankEvent());
+        }
+      }
+    } catch (e) {
+      print('Error extracting multiple events: $e');
+
+      // Fallback - at least return one event
+      final fallbackEvent = await OCRHelper.tryParseEvent(text);
+      if (fallbackEvent != null) {
+        events.add(fallbackEvent);
       }
     }
 
-    // If we couldn't extract multiple events, return an empty list
     return events;
   }
 
-  void _showMultiEventDialog(List<EventModel> events) {
+  // Helper function to get text around a match
+  String _getTextAroundMatch(String text, int start, int end, int radius) {
+    final startIndex = (start - radius) < 0 ? 0 : (start - radius);
+    final endIndex = (end + radius) > text.length ? text.length : (end + radius);
+    return text.substring(startIndex, endIndex);
+  }
+
+  // Helper to check if two events are similar
+  bool _isSimilarEvent(EventModel event1, EventModel event2) {
+    // Consider them similar if any 2 of these are the same: title, date, time, location
+    int similarityCount = 0;
+
+    if (event1.title == event2.title) similarityCount++;
+    if (event1.date != null && event2.date != null &&
+        event1.date!.year == event2.date!.year &&
+        event1.date!.month == event2.date!.month &&
+        event1.date!.day == event2.date!.day) similarityCount++;
+    if (event1.time != null && event2.time != null &&
+        event1.time!.hour == event2.time!.hour &&
+        event1.time!.minute == event2.time!.minute) similarityCount++;
+    if (event1.location == event2.location) similarityCount++;
+
+    return similarityCount >= 2;
+  }
+
+  // Remove duplicate events
+  List<EventModel> _removeDuplicateEvents(List<EventModel> events) {
+    final uniqueEvents = <EventModel>[];
+
+    for (var event in events) {
+      if (!uniqueEvents.any((e) => _isSimilarEvent(e, event))) {
+        uniqueEvents.add(event);
+      }
+    }
+
+    return uniqueEvents;
+  }
+
+  void _showMultiEventDetectionModal(List<EventModel> events) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2C),
-        title: const Text('Multiple Events Detected'),
-        content: Container(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: events.length,
-            itemBuilder: (context, index) {
-              final event = events[index];
-              return ListTile(
-                title: Text(event.title),
-                subtitle: Text(
-                  '${event.date != null ? event.formattedDate : "No date"} | '
-                      '${event.time != null ? event.formattedTime : "No time"}',
-                ),
-                trailing: IconButton(
-                  icon: const Icon(Icons.edit),
-                  onPressed: () {
-                    Navigator.pop(context);
-                    setState(() {
-                      _selectedEvent = event;
-                    });
-                    _navigateToEventDetails();
-                  },
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  setState(() {
-                    _selectedEvent = event;
-                  });
-                },
-              );
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: MultiEventDetectionModal(
+            detectedEvents: events,
+            onSelectSingle: (event) {
+              setState(() {
+                _detectedEvents = [event];
+                _selectedEventIndices = [0];
+              });
             },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _createBlankEvent();
+            onScheduleMultiple: (selectedEvents) {
+              _scheduleMultipleEvents(selectedEvents);
             },
-            child: const Text('Create New Event'),
+            onCreateNew: _createBlankEvent,
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-            ),
-            child: const Text('Select First Event'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
   void _createBlankEvent() {
     setState(() {
-      _selectedEvent = EventHelper.createBlankEvent();
-      _detectedEvents = [_selectedEvent!];
+      _detectedEvents = [EventHelper.createBlankEvent()];
+      _selectedEventIndices = [0];
       _ocrCompleted = true;
-      _multipleEventsDetected = false;
     });
-    _navigateToEventDetails();
+    _navigateToEventDetails(_detectedEvents[0]);
   }
 
-  void _navigateToEventDetails() {
-    if (_selectedEvent == null) return;
+  void _navigateToEventDetails(EventModel event) {
+    FocusScope.of(context).unfocus();
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => EventDetailsScreen(
-          event: _selectedEvent!,
-          onSave: (updatedEvent) {
-            setState(() {
-              _selectedEvent = updatedEvent;
-              // Update in the detected events list if it exists there
-              final index = _detectedEvents.indexWhere(
-                      (e) => e.title == _selectedEvent!.title &&
-                      e.date == _selectedEvent!.date
+    Future.delayed(const Duration(milliseconds: 50), () {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => EventDetailsScreen(
+            event: event,
+            onSave: (updatedEvent) {
+              setState(() {
+                final index = _detectedEvents.indexOf(event);
+                if (index != -1) {
+                  _detectedEvents[index] = updatedEvent;
+                } else {
+                  _detectedEvents.add(updatedEvent);
+                  _selectedEventIndices = [_detectedEvents.length - 1];
+                }
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Event saved successfully!')),
               );
-              if (index >= 0) {
-                _detectedEvents[index] = updatedEvent;
-              }
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Event saved successfully!')),
-            );
-          },
+            },
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 
-  Future<void> _scheduleEvent() async {
-    if (_selectedEvent == null) return;
+  Future<void> _scheduleEvent(EventModel event) async {
+    if (event.date == null || event.time == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please set both date and time for the event'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
     setState(() => _isScheduling = true);
 
     await EventHelper.scheduleEvent(
       context,
-      _selectedEvent!,
+      event,
           () {
         setState(() {
           _isScheduling = false;
-          // Remove the event from detected events list
-          _detectedEvents.remove(_selectedEvent);
-
-          // If we have more events, select the next one
-          if (_detectedEvents.isNotEmpty) {
-            _selectedEvent = _detectedEvents.first;
-          } else {
-            _selectedEvent = null;
-            _image = null; // Clear image once all events are processed
+          // Clear this event
+          final index = _detectedEvents.indexOf(event);
+          if (index != -1) {
+            _detectedEvents.removeAt(index);
+            _selectedEventIndices.remove(index);
+            // Update indices that were higher than the removed index
+            _selectedEventIndices = _selectedEventIndices.map((i) => i > index ? i - 1 : i).toList();
           }
         });
       },
-          () {
-        setState(() => _isScheduling = false);
-      },
+          () => setState(() => _isScheduling = false),
       _fetchUpcomingEvents,
     );
   }
 
-  Future<void> _scheduleAllEvents() async {
-    if (_detectedEvents.isEmpty) return;
+  Future<void> _scheduleMultipleEvents(List<EventModel> events) async {
+    if (events.isEmpty) return;
 
     setState(() => _isScheduling = true);
 
-    int successCount = 0;
-    for (final event in _detectedEvents) {
-      try {
-        await CalendarService.createCalendarEvent(event);
-        successCount++;
-      } catch (e) {
-        print('Failed to schedule event: $e');
-      }
+    try {
+      await EventHelper.scheduleMultipleEvents(
+        context,
+        events,
+            () {
+          setState(() {
+            _isScheduling = false;
+
+            // Remove all scheduled events from the detected events list
+            for (var event in events) {
+              final index = _detectedEvents.indexOf(event);
+              if (index != -1) {
+                _detectedEvents.removeAt(index);
+              }
+            }
+
+            // Clear selected indices
+            _selectedEventIndices = [];
+          });
+        },
+        _fetchUpcomingEvents,
+      );
+    } catch (e) {
+      setState(() => _isScheduling = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error scheduling events: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
-
-    setState(() {
-      _isScheduling = false;
-      if (successCount == _detectedEvents.length) {
-        // All events scheduled successfully
-        _detectedEvents = [];
-        _selectedEvent = null;
-        _image = null; // Clear image once all events are processed
-      } else if (successCount > 0) {
-        // Remove successfully scheduled events
-        _detectedEvents = _detectedEvents.sublist(successCount);
-        _selectedEvent = _detectedEvents.isNotEmpty ? _detectedEvents.first : null;
-      }
-    });
-
-    // Show feedback to user
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Scheduled $successCount out of ${_detectedEvents.length} events'),
-        backgroundColor: successCount > 0 ? Colors.green : Colors.orange,
-      ),
-    );
-
-    // Refresh upcoming events
-    _fetchUpcomingEvents();
   }
 
   Future<void> _fetchUpcomingEvents() async {
@@ -315,10 +404,27 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
 
     setState(() => _loadingEvents = true);
 
-    final events = await EventHelper.fetchUpcomingEvents();
+    try {
+      final events = await EventHelper.fetchUpcomingEvents();
+      setState(() {
+        _upcomingEvents = events;
+        _loadingEvents = false;
+      });
+    } catch (e) {
+      print('Error fetching events: $e');
+      setState(() => _loadingEvents = false);
+    }
+  }
+
+  void _toggleEventSelection(int index, bool selected) {
     setState(() {
-      _upcomingEvents = events;
-      _loadingEvents = false;
+      if (selected) {
+        if (!_selectedEventIndices.contains(index)) {
+          _selectedEventIndices.add(index);
+        }
+      } else {
+        _selectedEventIndices.remove(index);
+      }
     });
   }
 
@@ -337,166 +443,37 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
                   children: [
                     _buildImageArea(),
 
-                    // Multi-event indicator (if multiple events detected)
-                    if (_multipleEventsDetected && _detectedEvents.length > 1)
-                      Container(
-                        margin: const EdgeInsets.only(top: 16),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.blue.withOpacity(0.5)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.event_note, color: Colors.blue),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Multiple Events (${_detectedEvents.length})',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                                const Spacer(),
-                                if (_detectedEvents.length > 1)
-                                  TextButton.icon(
-                                    icon: const Icon(Icons.calendar_month, size: 16),
-                                    label: const Text('Schedule All'),
-                                    onPressed: _isScheduling ? null : _scheduleAllEvents,
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Select an event to edit or schedule below.',
-                              style: TextStyle(
-                                color: Colors.grey[400],
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                    // Add EventListView here
-                    if (_multipleEventsDetected && _detectedEvents.length > 1)
-                      EventListView(
-                        events: _detectedEvents,
-                        selectedEvent: _selectedEvent,
-                        onEventSelected: (event) {
-                          setState(() {
-                            _selectedEvent = event;
-                          });
-                        },
-                        onEventEdit: (event) {
-                          setState(() {
-                            _selectedEvent = event;
-                          });
-                          _navigateToEventDetails();
-                        },
-                        onEventSchedule: (event) {
-                          setState(() {
-                            _selectedEvent = event;
-                          });
-                          _scheduleEvent();
-                        },
-                        isScheduling: _isScheduling,
-                      ),
-
-                    // Selected event card - only show if not multiple events or if using navigation mode
-                    if (!_multipleEventsDetected && _selectedEvent != null)
-                      Container(
-                        margin: const EdgeInsets.only(top: 16),
-                        child: EventDetailsCard(
-                          event: _selectedEvent!,
-                          onEdit: _navigateToEventDetails,
-                          onSchedule: _scheduleEvent,
+                    // Show detected events
+                    if (_detectedEvents.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 24.0),
+                        child: DetectedEventsCard(
+                          events: _detectedEvents,
+                          onEditEvent: _navigateToEventDetails,
+                          onScheduleEvent: _scheduleEvent,
+                          onScheduleAll: _scheduleMultipleEvents,
+                          selectedIndices: _selectedEventIndices,
+                          onToggleSelection: _toggleEventSelection,
                           isScheduling: _isScheduling,
                         ),
                       ),
 
-                    // Raw OCR info button
-                    if (_ocrText.isNotEmpty && _selectedEvent != null)
-                      Container(
-                        margin: const EdgeInsets.only(top: 8),
-                        child: TextButton.icon(
-                          icon: const Icon(Icons.text_snippet, size: 16),
-                          label: const Text('View Raw OCR Text'),
-                          onPressed: _showOcrText,
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                          ),
-                        ),
+                    // OCR Information if available
+                    if (_ocrText.isNotEmpty && _detectedEvents.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 16.0),
+                        child: _buildOcrInfoCard(),
                       ),
 
-                    // Upcoming events section
+                    // Show upcoming events
                     if (_upcomingEvents.isNotEmpty)
-                      _buildUpcomingEvents(),
+                      _buildUpcomingEventsSection(),
                   ],
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  int _getSelectedEventIndex() {
-    if (_selectedEvent == null) return 0;
-    final index = _detectedEvents.indexOf(_selectedEvent!);
-    return index >= 0 ? index : 0;
-  }
-
-  void _showOcrText() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1E1E2C),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Raw OCR Text',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              const Divider(),
-              const SizedBox(height: 8),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Text(
-                    _ocrText,
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Center(
-                child: ElevatedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Close'),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        );
-      },
-      isScrollControlled: true,
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.7,
       ),
     );
   }
@@ -546,6 +523,7 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
         constraints: const BoxConstraints(minHeight: 200, maxHeight: 350),
         child: _image != null
             ? Stack(
+          fit: StackFit.expand,
           children: [
             GestureDetector(
               onTap: () => Navigator.push(
@@ -559,42 +537,54 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
                 child: Image.file(
                   _image!,
                   fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity,
                 ),
               ),
             ),
             Positioned(
               bottom: 12,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _image = null;
-                      _ocrText = '';
-                      _ocrCompleted = false;
-                      _selectedEvent = null;
-                      _detectedEvents = [];
-                      _multipleEventsDetected = false;
-                      _structuredData = {};
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.8),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.delete, color: Colors.white, size: 20),
-                        SizedBox(width: 8),
-                        Text('Delete', style: TextStyle(color: Colors.white)),
-                      ],
-                    ),
+              right: 12,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.zoom_in,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 12,
+              left: 12,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _image = null;
+                    _ocrText = '';
+                    _ocrCompleted = false;
+                    _detectedEvents = [];
+                    _selectedEventIndices = [];
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.delete, color: Colors.white, size: 16),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'Delete',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -609,7 +599,10 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
               color: FuturisticTheme.primaryBlue,
             ),
             const SizedBox(height: 16),
-            const Text('Upload Event Image', style: TextStyle(color: Colors.white, fontSize: 18)),
+            const Text(
+              'Upload Event Image',
+              style: TextStyle(color: Colors.white, fontSize: 18),
+            ),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -631,17 +624,108 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
     );
   }
 
-  Widget _buildUpcomingEvents() {
+  Widget _buildOcrInfoCard() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: FuturisticTheme.softBlue.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: FuturisticTheme.gridLineColor,
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, color: Colors.blue, size: 16),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'OCR text extracted successfully',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+          TextButton(
+            onPressed: _showOcrTextModal,
+            child: const Text(
+              'View Raw Text',
+              style: TextStyle(color: Colors.blue, fontSize: 12),
+            ),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showOcrTextModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Raw OCR Text',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Divider(),
+              const SizedBox(height: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Text(
+                    _ocrText,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Center(
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Close'),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.7,
+      ),
+    );
+  }
+
+  Widget _buildUpcomingEventsSection() {
     return Container(
       margin: const EdgeInsets.only(top: 32, bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header
           Row(
             children: [
               const Text(
                 'UPCOMING EVENTS',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white70),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white70,
+                  letterSpacing: 1.2,
+                ),
               ),
               const Spacer(),
               IconButton(
@@ -651,22 +735,28 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
               ),
             ],
           ),
+
           const SizedBox(height: 12),
+
+          // Loading indicator or events list
           _loadingEvents
               ? const Center(
-            child: CircularProgressIndicator(),
+            child: Padding(
+              padding: EdgeInsets.all(16.0),
+              child: CircularProgressIndicator(),
+            ),
           )
               : _upcomingEvents.isEmpty
               ? Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E1E2C),
+              color: FuturisticTheme.softBlue,
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Center(
               child: Text(
                 'You have no upcoming events',
-                style: TextStyle(color: Colors.grey),
+                style: TextStyle(color: Colors.white70),
               ),
             ),
           )
@@ -679,33 +769,43 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
               final startTime = event['start']?['dateTime'] != null
                   ? DateTime.parse(event['start']['dateTime'])
                   : null;
+
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E2C),
+                  color: FuturisticTheme.softBlue,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: ListTile(
-                  title: Text(event['summary'] ?? 'Untitled Event'),
+                  title: Text(
+                    event['summary'] ?? 'Untitled Event',
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   subtitle: Text(
                     startTime != null
-                        ? '${startTime.month}/${startTime.day}/${startTime.year} ${startTime.hour}:${startTime.minute}'
+                        ? '${startTime.month}/${startTime.day}/${startTime.year} ${startTime.hour}:${startTime.minute.toString().padLeft(2, '0')}'
                         : 'No date specified',
+                    style: const TextStyle(fontSize: 12),
                   ),
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
+                      color: FuturisticTheme.primaryBlue.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.event, color: Colors.blue),
+                    child: const Icon(
+                      Icons.event,
+                      color: Colors.blue,
+                      size: 20,
+                    ),
                   ),
                   trailing: IconButton(
                     icon: const Icon(Icons.open_in_new, size: 18),
-                    onPressed: () {
-                      CalendarService.openEventInCalendar(event['htmlLink']);
-                    },
+                    onPressed: () => CalendarService.openEventInCalendar(event['htmlLink']),
                   ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 ),
               );
             },
