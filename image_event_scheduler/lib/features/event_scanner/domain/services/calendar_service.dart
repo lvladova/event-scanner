@@ -149,6 +149,33 @@ class CalendarService {
     }
   }
 
+  // Batch create calendar events
+  static Future<List<Map<String, dynamic>>> createCalendarEventBatch(
+    List<EventModel> events,
+  ) async {
+    List<Map<String, dynamic>> results = [];
+
+    // Process each event, collecting success/failure results
+    for (final event in events) {
+      try {
+        final result = await createCalendarEvent(event);
+        results.add({
+          'status': 'success',
+          'event': result,
+          'title': event.title
+        });
+      } catch (e) {
+        results.add({
+          'status': 'error',
+          'error': e.toString(),
+          'title': event.title
+        });
+      }
+    }
+
+    return results;
+  }
+
   // The rest of your methods would remain the same as in the previous example...
   static Future<List<Map<String, dynamic>>> getUpcomingEvents() async {
     try {

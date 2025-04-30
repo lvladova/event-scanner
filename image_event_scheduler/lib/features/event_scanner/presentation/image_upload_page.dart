@@ -13,6 +13,8 @@ import 'package:image_event_scheduler/features/event_scanner/presentation/event_
 import 'package:image_event_scheduler/shared/theme/futuristic_theme.dart';
 import 'package:image_event_scheduler/shared/widgets/futuristic_widgets.dart';
 import 'package:image_event_scheduler/shared/widgets/futuristic_animations.dart';
+import 'package:image_event_scheduler/features/event_scanner/domain/schedule_model.dart';
+import 'package:image_event_scheduler/features/event_scanner/presentation/multi_event_selection_screen.dart';
 
 class ImageUploadPage extends StatefulWidget {
   const ImageUploadPage({Key? key}) : super(key: key);
@@ -30,6 +32,9 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
   bool _isScheduling = false;
   List<Map<String, dynamic>> _upcomingEvents = [];
   bool _loadingEvents = false;
+
+  ScheduleModel? _scheduleModel;
+  bool _isMultiEvent = false;
 
   Future<void> _pickImage() async {
     final pickedFile = await ImageHelper.pickImageFromGallery();
@@ -61,30 +66,51 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
       _ocrCompleted = false;
     });
 
-    final extractedText = await OCRHelper.extractTextOnly(_image!);
+    // First try to parse as a schedule
+    _scheduleModel = await OCRHelper.tryParseSchedule(_image!);
 
-    if (extractedText.isEmpty) {
+    // Determine if we should treat as multi or single event
+    if (_scheduleModel != null && _scheduleModel!.events.length > 1) {
       setState(() {
-        _ocrText = "No text detected in the image.";
+        _isMultiEvent = true;
+        _isLoading = false;
+      });
+      _navigateToMultiEventSelection();
+    } else if (_scheduleModel != null && _scheduleModel!.events.length == 1) {
+      setState(() {
+        _eventDetails = _scheduleModel!.events.first;
+        _isMultiEvent = false;
+        _isLoading = false;
+      });
+      _navigateToEventDetails();
+    } else {
+      setState(() {
+        _ocrText = "No valid schedule or events detected.";
         _isLoading = false;
       });
       DialogHelper.showRetryDialog(context, _createBlankEvent, _startOCR);
-      return;
     }
+  }
 
-    setState(() {
-      _ocrText = extractedText;
-    });
-
-    final parsedEvent = await OCRHelper.tryParseEvent(extractedText);
-
-    setState(() {
-      _eventDetails = parsedEvent ?? EventHelper.createBlankEvent();
-      _ocrCompleted = true;
-      _isLoading = false;
-    });
-
-    _navigateToEventDetails();
+  void _navigateToMultiEventSelection() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            MultiEventSelectionScreen(
+              schedule: _scheduleModel!,
+              onEventsSelected: (selectedEvents) {
+                // Handle selected events
+                setState(() {
+                  _eventDetails =
+                  selectedEvents.isNotEmpty ? selectedEvents.first : null;
+                  _isMultiEvent = false;
+                });
+                _navigateToEventDetails();
+              },
+            ),
+      ),
+    );
   }
 
   void _createBlankEvent() {
@@ -372,6 +398,3 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
     );
   }
 }
-
-
-

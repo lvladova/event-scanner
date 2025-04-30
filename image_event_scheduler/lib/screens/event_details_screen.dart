@@ -347,7 +347,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               foregroundColor: Colors.white
           ),
           child: const Text(
-            'SAVE EVENT',
+            'SAVE DETAILS',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
