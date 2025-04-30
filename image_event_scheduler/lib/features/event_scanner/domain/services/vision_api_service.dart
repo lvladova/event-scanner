@@ -2,44 +2,57 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 
+/// Simple text extraction from image
 Future<String> extractTextFromImage(File imageFile, String apiKey) async {
-  final bytes = await imageFile.readAsBytes();
-  final base64Image = base64Encode(bytes);
+  try {
+    final bytes = await imageFile.readAsBytes();
+    final base64Image = base64Encode(bytes);
 
-  final response = await http.post(
-    Uri.parse('https://vision.googleapis.com/v1/images:annotate?key=$apiKey'),
-    headers: {"Content-Type": "application/json"},
-    body: jsonEncode({
-      "requests": [
-        {
-          "image": {"content": base64Image},
-          "features": [{"type": "TEXT_DETECTION", "maxResults": 1}]
-        }
-      ]
-    }),
-  );
+    final response = await http.post(
+      Uri.parse('https://vision.googleapis.com/v1/images:annotate?key=$apiKey'),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({
+        "requests": [
+          {
+            "image": {"content": base64Image},
+            "features": [{"type": "TEXT_DETECTION", "maxResults": 1}]
+          }
+        ]
+      }),
+    );
 
-  if (response.statusCode == 200) {
-    final data = jsonDecode(response.body);
-    if (data['responses']?.isEmpty || data['responses'][0]['textAnnotations'] == null) {
-      return "No text found in image";
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = jsonDecode(response.body);
+
+      // Handle potential null responses safely
+      if (data['responses'] == null ||
+          data['responses'].isEmpty ||
+          data['responses'][0]['textAnnotations'] == null ||
+          data['responses'][0]['textAnnotations'].isEmpty) {
+        return "No text found in image";
+      }
+
+      final String? description = data['responses'][0]['textAnnotations'][0]['description'];
+      return description ?? "No text found";
+    } else {
+      // Print detailed error message
+      print('API Error Response: ${response.body}');
+      throw Exception('Failed to extract text: ${response.statusCode}');
     }
-    final description = data['responses'][0]['textAnnotations'][0]['description'];
-    return description ?? "No text found";
-  } else {
-    // Print detailed error message
-    print('API Error Response: ${response.body}');
-    throw Exception('Failed to extract text: ${response.statusCode}');
+  } catch (e) {
+    print('Error extracting text from image: $e');
+    throw Exception('Failed to process image: $e');
   }
 }
 
-/// Extract text and comprehensive document structure from an image
+/// Enhanced function to extract both raw text and structured information
 Future<Map<String, dynamic>> extractTextAndStructureFromImage(File imageFile, String apiKey) async {
   try {
     final bytes = await imageFile.readAsBytes();
     final base64Image = base64Encode(bytes);
 
-    // Enhanced request with multiple detection types
+    // Request both TEXT_DETECTION and DOCUMENT_TEXT_DETECTION
+    // DOCUMENT_TEXT_DETECTION provides more structured information with paragraphs and blocks
     final response = await http.post(
       Uri.parse('https://vision.googleapis.com/v1/images:annotate?key=$apiKey'),
       headers: {"Content-Type": "application/json"},
@@ -50,594 +63,230 @@ Future<Map<String, dynamic>> extractTextAndStructureFromImage(File imageFile, St
             "features": [
               {"type": "TEXT_DETECTION", "maxResults": 1},
               {"type": "DOCUMENT_TEXT_DETECTION", "maxResults": 1},
-              {"type": "IMAGE_PROPERTIES", "maxResults": 1},
-              {"type": "OBJECT_LOCALIZATION", "maxResults": 10}
-            ],
-            "imageContext": {
-              "languageHints": ["en"], // Add more languages as needed
-              "textDetectionParams": {
-                "enableTextDetectionConfidenceScore": true
-              }
-            }
+              {"type": "LABEL_DETECTION", "maxResults": 5}  // Add label detection for context
+            ]
           }
         ]
       }),
     );
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      final responses = data['responses']?[0] ?? {};
+      final Map<String, dynamic> data = jsonDecode(response.body);
 
-      // 1. Extract basic text
-      String extractedText = "No text found in image";
-      if (responses['textAnnotations'] != null &&
-          responses['textAnnotations'].isNotEmpty) {
-        extractedText = responses['textAnnotations'][0]['description'] ?? "No text found";
+      // Initialize result structure
+      final Map<String, dynamic> result = {
+        'rawText': '',
+        'blocks': <Map<String, dynamic>>[],
+        'paragraphs': <Map<String, dynamic>>[],
+        'lines': <Map<String, dynamic>>[],
+        'words': <Map<String, dynamic>>[],
+        'labels': <String>[],
+        'success': true,
+      };
+
+      // Extract raw text from TEXT_DETECTION
+      if (data['responses'] != null &&
+          data['responses'].isNotEmpty &&
+          data['responses'][0]['textAnnotations'] != null &&
+          data['responses'][0]['textAnnotations'].isNotEmpty) {
+
+        final String? description = data['responses'][0]['textAnnotations'][0]['description'];
+        result['rawText'] = description ?? "No text found";
+      } else {
+        return {
+          'rawText': "No text found in image",
+          'blocks': <Map<String, dynamic>>[],
+          'paragraphs': <Map<String, dynamic>>[],
+          'lines': <Map<String, dynamic>>[],
+          'words': <Map<String, dynamic>>[],
+          'labels': <String>[],
+          'success': false,
+        };
       }
 
-      // 2. Process structured document text (with layout info)
-      final documentResults = <Map<String, dynamic>>[];
-      if (responses['fullTextAnnotation'] != null) {
-        final fullText = responses['fullTextAnnotation'];
+      // Extract structured text from DOCUMENT_TEXT_DETECTION
+      if (data['responses'] != null &&
+          data['responses'].isNotEmpty &&
+          data['responses'][0]['fullTextAnnotation'] != null) {
 
-        // Extract page info
-        if (fullText['pages'] != null) {
-          for (var page in fullText['pages']) {
-            // Process blocks (paragraphs, tables, etc.)
-            if (page['blocks'] != null) {
-              for (var block in page['blocks']) {
-                final blockInfo = {
-                  'blockType': block['blockType'] ?? 'TEXT',
-                  'boundingBox': block['boundingBox'],
-                  'confidence': block['confidence'] ?? 0.0,
-                  'text': '',
-                  'paragraphs': <Map<String, dynamic>>[],
-                };
+        final fullTextAnnotation = data['responses'][0]['fullTextAnnotation'];
 
-                // Extract paragraphs within each block
-                if (block['paragraphs'] != null) {
-                  for (var paragraph in block['paragraphs']) {
-                    final paraInfo = {
-                      'boundingBox': paragraph['boundingBox'],
-                      'confidence': paragraph['confidence'] ?? 0.0,
-                      'text': '',
-                      'words': <Map<String, dynamic>>[],
-                    };
+        // Extract structured elements (if available)
+        if (fullTextAnnotation['pages'] != null && fullTextAnnotation['pages'].isNotEmpty) {
+          // Extract blocks
+          for (var block in fullTextAnnotation['pages'][0]['blocks'] ?? []) {
+            final Map<String, dynamic> blockData = {
+              'text': _getTextFromBlock(block),
+              'boundingBox': block['boundingBox'],
+              'paragraphs': <Map<String, dynamic>>[]
+            };
 
-                    // Extract words within each paragraph
-                    if (paragraph['words'] != null) {
-                      for (var word in paragraph['words']) {
-                        final wordText = _extractTextFromSymbols(word['symbols']);
+            // Extract paragraphs within the block
+            for (var paragraph in block['paragraphs'] ?? []) {
+              final Map<String, dynamic> paragraphData = {
+                'text': _getTextFromParagraph(paragraph),
+                'boundingBox': paragraph['boundingBox'],
+                'words': <Map<String, dynamic>>[],
+              };
 
-                        paraInfo['words'].add({
-                          'boundingBox': word['boundingBox'],
-                          'confidence': word['confidence'] ?? 0.0,
-                          'text': wordText,
-                          'symbols': word['symbols'] ?? [],
-                        });
-
-                        paraInfo['text'] += wordText + ' ';
-                      }
-
-                      paraInfo['text'] = paraInfo['text'].trim();
-                    }
-
-                    blockInfo['paragraphs'].add(paraInfo);
-                    blockInfo['text'] += paraInfo['text'] + '\n';
-                  }
-
-                  blockInfo['text'] = blockInfo['text'].trim();
+              // Extract words within the paragraph
+              for (var word in paragraph['words'] ?? []) {
+                final String wordText = _getTextFromWord(word);
+                if (wordText.isNotEmpty) {
+                  paragraphData['words'].add({
+                    'text': wordText,
+                    'boundingBox': word['boundingBox'],
+                  });
                 }
-
-                documentResults.add(blockInfo);
               }
+
+              blockData['paragraphs'].add(paragraphData);
+              result['paragraphs'].add(paragraphData);
             }
+
+            result['blocks'].add(blockData);
           }
         }
       }
 
-      // 3. Extract table structures
-      final tableStructures = _detectTableStructures(responses);
+      // Extract labels if available (for context)
+      if (data['responses'] != null &&
+          data['responses'].isNotEmpty &&
+          data['responses'][0]['labelAnnotations'] != null) {
 
-      // 4. Identify potential list items
-      final listItems = _detectListItems(extractedText);
+        for (var label in data['responses'][0]['labelAnnotations']) {
+          final String? description = label['description'];
+          if (description != null && description.isNotEmpty) {
+            result['labels'].add(description);
+          }
+        }
+      }
 
-      // 5. Process layout-based relationships
-      final layoutAnalysis = _analyzeTextLayout(responses);
-
-      // Return comprehensive results
-      return {
-        'text': extractedText,
-        'fullResponse': responses,
-        'documentStructure': {
-          'blocks': documentResults,
-          'tables': tableStructures,
-          'lists': listItems,
-          'layout': layoutAnalysis,
-        },
-        'textDensityMap': _generateTextDensityMap(responses),
-        'confidence': _calculateOverallConfidence(responses),
-      };
+      return result;
     } else {
+      // Print detailed error message
       print('API Error Response: ${response.body}');
-      throw Exception('Failed to extract text: ${response.statusCode}');
+      throw Exception('Failed to extract text and structure: ${response.statusCode}');
     }
   } catch (e) {
-    print('Error in text extraction: $e');
-    return {
-      'text': 'Error: Failed to process image',
-      'fullResponse': {},
-      'documentStructure': {
-        'blocks': [],
-        'tables': [],
-        'lists': [],
-        'layout': {},
-      },
-      'error': e.toString(),
-    };
+    print('Error extracting text and structure from image: $e');
+    throw Exception('Failed to process image: $e');
   }
 }
 
-/// Extract text from symbol annotations
-String _extractTextFromSymbols(List<dynamic>? symbols) {
-  if (symbols == null) return '';
+// Helper function to extract text from a block
+String _getTextFromBlock(Map<String, dynamic> block) {
+  final StringBuffer buffer = StringBuffer();
 
-  final buffer = StringBuffer();
-  for (var symbol in symbols) {
-    buffer.write(symbol['text'] ?? '');
-
-    // Add space if detected
-    if (symbol['property']?['detectedBreak']?['type'] == 'SPACE') {
-      buffer.write(' ');
-    }
-
-    // Add newline if detected
-    if (symbol['property']?['detectedBreak']?['type'] == 'EOL_SURE_SPACE' ||
-        symbol['property']?['detectedBreak']?['type'] == 'LINE_BREAK') {
-      buffer.write('\n');
+  // Extract text from paragraphs
+  for (var paragraph in block['paragraphs'] ?? []) {
+    final String paragraphText = _getTextFromParagraph(paragraph);
+    if (paragraphText.isNotEmpty) {
+      if (buffer.isNotEmpty) {
+        buffer.write('\n');
+      }
+      buffer.write(paragraphText);
     }
   }
 
   return buffer.toString();
 }
 
-/// Detect table structures from document layout
-List<Map<String, dynamic>> _detectTableStructures(Map<String, dynamic> response) {
-  final tables = <Map<String, dynamic>>[];
+// Helper function to extract text from a paragraph
+String _getTextFromParagraph(Map<String, dynamic> paragraph) {
+  final StringBuffer buffer = StringBuffer();
 
-  try {
-    // Table detection logic based on layout and alignments
-    final fullTextAnnotation = response['fullTextAnnotation'];
-    if (fullTextAnnotation != null && fullTextAnnotation['pages'] != null) {
-      for (var page in fullTextAnnotation['pages']) {
-        if (page['blocks'] == null) continue;
-
-        // Find blocks that might represent tables
-        for (var block in page['blocks']) {
-          // Skip non-text blocks
-          if (block['blockType'] != 'TEXT') continue;
-
-          // Check for grid-like arrangement of words
-          final gridAnalysis = _analyzeBlockForGridPattern(block);
-          if (gridAnalysis['isLikelyTable']) {
-            tables.add({
-              'boundingBox': block['boundingBox'],
-              'confidence': block['confidence'] ?? 0.0,
-              'rows': gridAnalysis['rows'],
-              'columns': gridAnalysis['columns'],
-              'cellData': gridAnalysis['cellData'],
-            });
-          }
-        }
+  // Extract text from words
+  for (var word in paragraph['words'] ?? []) {
+    final String wordText = _getTextFromWord(word);
+    if (wordText.isNotEmpty) {
+      if (buffer.isNotEmpty) {
+        buffer.write(' ');
       }
+      buffer.write(wordText);
     }
-  } catch (e) {
-    print('Error detecting tables: $e');
   }
 
-  return tables;
+  return buffer.toString();
 }
 
-/// Analyze if a text block has a grid/table pattern
-Map<String, dynamic> _analyzeBlockForGridPattern(Map<String, dynamic> block) {
-  // Default response
-  final result = {
-    'isLikelyTable': false,
-    'rows': 0,
-    'columns': 0,
-    'cellData': <Map<String, dynamic>>[],
+// Helper function to extract text from a word
+String _getTextFromWord(Map<String, dynamic> word) {
+  final StringBuffer buffer = StringBuffer();
+
+  // Extract text from symbols
+  for (var symbol in word['symbols'] ?? []) {
+    final String? text = symbol['text'];
+    if (text != null) {
+      buffer.write(text);
+    }
+  }
+
+  return buffer.toString();
+}
+
+// Function to detect dates, times, and locations from extracted text
+Map<String, dynamic> extractEventData(Map<String, dynamic> structuredText) {
+  final Map<String, dynamic> eventData = {
+    'dates': <String>[],
+    'times': <String>[],
+    'locations': <String>[],
+    'titles': <String>[],
   };
 
-  try {
-    if (block['paragraphs'] == null || block['paragraphs'].isEmpty) {
-      return result;
+  // Use the blocks to identify potential event information
+  for (var block in structuredText['blocks'] ?? []) {
+    final String text = block['text'] ?? '';
+
+    // Simple regex patterns for demonstration
+    // In a real app, you'd use more sophisticated NLP or regex patterns
+
+    // Date patterns
+    final datePattern1 = RegExp(r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b'); // MM/DD/YYYY
+    final datePattern2 = RegExp(r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b', caseSensitive: false); // Month DD, YYYY
+
+    // Time patterns
+    final timePattern = RegExp(r'\b\d{1,2}:\d{2}\s*(?:am|pm|AM|PM)?\b');
+
+    // Location patterns (very simplified)
+    final locationPattern = RegExp(r'\b(?:at|in|location|venue)[:\s]+([^\n\.]+)', caseSensitive: false);
+
+    // Extract dates
+    for (final match in datePattern1.allMatches(text)) {
+      eventData['dates'].add(match.group(0)!);
+    }
+    for (final match in datePattern2.allMatches(text)) {
+      eventData['dates'].add(match.group(0)!);
     }
 
-    // Collect all word bounding boxes
-    final wordPositions = <Map<String, dynamic>>[];
-    for (var paragraph in block['paragraphs']) {
-      if (paragraph['words'] == null) continue;
+    // Extract times
+    for (final match in timePattern.allMatches(text)) {
+      eventData['times'].add(match.group(0)!);
+    }
 
-      for (var word in paragraph['words']) {
-        // Skip words without bounding boxes
-        if (word['boundingBox'] == null || word['boundingBox']['vertices'] == null) continue;
-
-        // Extract word text
-        final wordText = _extractTextFromSymbols(word['symbols']);
-
-        // Calculate bounding box center
-        final vertices = word['boundingBox']['vertices'];
-        final centerX = (vertices[0]['x'] + vertices[1]['x'] + vertices[2]['x'] + vertices[3]['x']) / 4;
-        final centerY = (vertices[0]['y'] + vertices[1]['y'] + vertices[2]['y'] + vertices[3]['y']) / 4;
-
-        wordPositions.add({
-          'text': wordText,
-          'centerX': centerX,
-          'centerY': centerY,
-          'boundingBox': word['boundingBox'],
-        });
+    // Extract potential locations
+    for (final match in locationPattern.allMatches(text)) {
+      if (match.groupCount >= 1) {
+        eventData['locations'].add(match.group(1)!.trim());
       }
     }
 
-    // Need sufficient words to form a table
-    if (wordPositions.length < 6) {
-      return result;
-    }
-
-    // Analyze vertical alignments (rows)
-    final yPositions = wordPositions.map((w) => w['centerY']).toList();
-    yPositions.sort();
-
-    // Group y-positions that are close together (within threshold)
-    final yThreshold = 10.0; // Adjust based on image size
-    final yGroups = <List<double>>[];
-
-    for (var y in yPositions) {
-      bool grouped = false;
-      for (var group in yGroups) {
-        if ((y - group.last).abs() < yThreshold) {
-          group.add(y);
-          grouped = true;
-          break;
-        }
-      }
-
-      if (!grouped) {
-        yGroups.add([y]);
+    // The first paragraph might be the title (simplified approach)
+    if (block['paragraphs'] != null &&
+        block['paragraphs'].isNotEmpty &&
+        block['paragraphs'][0]['text'] != null) {
+      final String paragraphText = block['paragraphs'][0]['text'];
+      // Only consider it a title if it's not a date, time, or location
+      if (!datePattern1.hasMatch(paragraphText) &&
+          !datePattern2.hasMatch(paragraphText) &&
+          !timePattern.hasMatch(paragraphText) &&
+          !locationPattern.hasMatch(paragraphText)) {
+        eventData['titles'].add(paragraphText);
       }
     }
-
-    // Similar analysis for columns (x positions)
-    final xPositions = wordPositions.map((w) => w['centerX']).toList();
-    xPositions.sort();
-
-    final xThreshold = 15.0; // Adjust based on image size
-    final xGroups = <List<double>>[];
-
-    for (var x in xPositions) {
-      bool grouped = false;
-      for (var group in xGroups) {
-        if ((x - group.last).abs() < xThreshold) {
-          group.add(x);
-          grouped = true;
-          break;
-        }
-      }
-
-      if (!grouped) {
-        xGroups.add([x]);
-      }
-    }
-
-    // Calculate average y-coordinate for each row
-    final rowCenters = yGroups.map((group) {
-      return group.reduce((a, b) => a + b) / group.length;
-    }).toList();
-
-    // Calculate average x-coordinate for each column
-    final colCenters = xGroups.map((group) {
-      return group.reduce((a, b) => a + b) / group.length;
-    }).toList();
-
-    // Assign words to cells based on their proximity to row/column centers
-    final cellData = <Map<String, dynamic>>[];
-
-    for (var word in wordPositions) {
-      // Find closest row
-      int rowIndex = 0;
-      double minRowDist = double.infinity;
-
-      for (int i = 0; i < rowCenters.length; i++) {
-        final dist = (word['centerY'] - rowCenters[i]).abs();
-        if (dist < minRowDist) {
-          minRowDist = dist;
-          rowIndex = i;
-        }
-      }
-
-      // Find closest column
-      int colIndex = 0;
-      double minColDist = double.infinity;
-
-      for (int i = 0; i < colCenters.length; i++) {
-        final dist = (word['centerX'] - colCenters[i]).abs();
-        if (dist < minColDist) {
-          minColDist = dist;
-          colIndex = i;
-        }
-      }
-
-      // Add to cell data
-      cellData.add({
-        'text': word['text'],
-        'row': rowIndex,
-        'column': colIndex,
-        'boundingBox': word['boundingBox'],
-      });
-    }
-
-    // Determine if this is likely a table
-    // Criteria: Multiple rows and columns with fairly even distribution
-    final isLikelyTable = rowCenters.length >= 2 && colCenters.length >= 2;
-
-    if (isLikelyTable) {
-      result['isLikelyTable'] = true;
-      result['rows'] = rowCenters.length;
-      result['columns'] = colCenters.length;
-      result['cellData'] = cellData;
-    }
-  } catch (e) {
-    print('Error analyzing block for grid pattern: $e');
   }
 
-  return result;
+  return eventData;
 }
 
-/// Detect potential list items in text
-List<Map<String, dynamic>> _detectListItems(String text) {
-  final listItems = <Map<String, dynamic>>[];
 
-  try {
-    final lines = text.split('\n');
-
-    // Common list item patterns
-    final listItemPatterns = [
-      RegExp(r'^\s*\d+\.\s+(.+)$'),                // Numbered: "1. Item"
-      RegExp(r'^\s*[a-z]\)\s+(.+)$'),              // Lettered: "a) Item"
-      RegExp(r'^\s*[\*\-•■□▪▫◦○●]\s+(.+)$'),       // Bulleted: "• Item"
-      RegExp(r'^\s*\(\d+\)\s+(.+)$'),              // Parenthesis: "(1) Item"
-    ];
-
-    for (int i = 0; i < lines.length; i++) {
-      final line = lines[i];
-
-      for (var pattern in listItemPatterns) {
-        final match = pattern.firstMatch(line);
-        if (match != null) {
-          // This line is a list item
-          final content = match.group(1) ?? '';
-
-          listItems.add({
-            'lineIndex': i,
-            'text': content,
-            'fullText': line,
-            'indentLevel': _countLeadingSpaces(line),
-          });
-
-          break;
-        }
-      }
-    }
-  } catch (e) {
-    print('Error detecting list items: $e');
-  }
-
-  return listItems;
-}
-
-/// Count leading spaces to determine indentation level
-int _countLeadingSpaces(String text) {
-  final match = RegExp(r'^\s*').firstMatch(text);
-  return match != null ? match.group(0)!.length : 0;
-}
-
-/// Analyze text layout for spatial relationships
-Map<String, dynamic> _analyzeTextLayout(Map<String, dynamic> response) {
-  final layout = {
-    'textLines': <Map<String, dynamic>>[],
-    'textBlocks': <Map<String, dynamic>>[],
-    'textRegions': <Map<String, dynamic>>[],
-  };
-
-  try {
-    if (response['textAnnotations'] == null || response['textAnnotations'].isEmpty) {
-      return layout;
-    }
-
-    // Skip the first annotation (which is the entire text)
-    final annotations = response['textAnnotations'].sublist(1);
-
-    // Group text by vertical position (to identify lines)
-    final Map<int, List<Map<String, dynamic>>> lineGroups = {};
-
-    for (var annotation in annotations) {
-      if (annotation['boundingPoly'] == null || annotation['boundingPoly']['vertices'] == null) {
-        continue;
-      }
-
-      final vertices = annotation['boundingPoly']['vertices'];
-      if (vertices.length < 4) continue;
-
-      // Calculate center Y position
-      final centerY = (vertices[0]['y'] + vertices[1]['y'] + vertices[2]['y'] + vertices[3]['y']) / 4;
-
-      // Group with 10px tolerance
-      final lineY = (centerY / 10).round() * 10;
-
-      if (!lineGroups.containsKey(lineY)) {
-        lineGroups[lineY] = [];
-      }
-
-      lineGroups[lineY]!.add({
-        'text': annotation['description'] ?? '',
-        'boundingPoly': annotation['boundingPoly'],
-        'centerX': (vertices[0]['x'] + vertices[1]['x'] + vertices[2]['x'] + vertices[3]['x']) / 4,
-        'centerY': centerY,
-      });
-    }
-
-    // Sort line groups by Y position
-    final sortedLineKeys = lineGroups.keys.toList()..sort();
-
-    // Process each line
-    for (int i = 0; i < sortedLineKeys.length; i++) {
-      final key = sortedLineKeys[i];
-      final line = lineGroups[key]!;
-
-      // Sort words in the line by X position
-      line.sort((a, b) => a['centerX'].compareTo(b['centerX']));
-
-      // Collect text for this line
-      final lineText = line.map((item) => item['text']).join(' ');
-
-      layout['textLines'].add({
-        'index': i,
-        'y': key,
-        'text': lineText,
-        'words': line,
-      });
-    }
-
-    // Group lines into blocks based on vertical spacing
-    final lineSpacings = <double>[];
-    for (int i = 1; i < sortedLineKeys.length; i++) {
-      lineSpacings.add((sortedLineKeys[i] - sortedLineKeys[i-1]).toDouble());
-    }
-
-    // Calculate median line spacing
-    if (lineSpacings.isNotEmpty) {
-      lineSpacings.sort();
-      final medianSpacing = lineSpacings[lineSpacings.length ~/ 2];
-
-      // Group lines that are within 1.5x median spacing
-      int currentBlock = 0;
-      List<int> blockLines = [0]; // First line is in the first block
-
-      for (int i = 1; i < sortedLineKeys.length; i++) {
-        final spacing = sortedLineKeys[i] - sortedLineKeys[i-1];
-
-        if (spacing > medianSpacing * 1.5) {
-          // New block
-          layout['textBlocks'].add({
-            'index': currentBlock,
-            'lines': blockLines.map((j) => layout['textLines'][j]).toList(),
-            'text': blockLines.map((j) => layout['textLines'][j]['text']).join('\n'),
-          });
-
-          currentBlock++;
-          blockLines = [i];
-        } else {
-          // Continue current block
-          blockLines.add(i);
-        }
-      }
-
-      // Add the last block
-      if (blockLines.isNotEmpty) {
-        layout['textBlocks'].add({
-          'index': currentBlock,
-          'lines': blockLines.map((j) => layout['textLines'][j]).toList(),
-          'text': blockLines.map((j) => layout['textLines'][j]['text']).join('\n'),
-        });
-      }
-    }
-  } catch (e) {
-    print('Error analyzing text layout: $e');
-  }
-
-  return layout;
-}
-
-/// Generate a heatmap of text density
-Map<String, dynamic> _generateTextDensityMap(Map<String, dynamic> response) {
-  const int gridSize = 10; // 10x10 grid
-  final Map<String, dynamic> densityMap = {
-    'gridSize': gridSize,
-    'cells': List.generate(gridSize, (_) => List.filled(gridSize, 0)),
-  };
-
-  try {
-    if (response['textAnnotations'] == null || response['textAnnotations'].isEmpty) {
-      return densityMap;
-    }
-
-    // Extract image dimensions
-    var maxX = 0.0;
-    var maxY = 0.0;
-
-    for (var annotation in response['textAnnotations']) {
-      if (annotation['boundingPoly'] == null || annotation['boundingPoly']['vertices'] == null) {
-        continue;
-      }
-
-      for (var vertex in annotation['boundingPoly']['vertices']) {
-        if (vertex['x'] != null && vertex['x'] > maxX) maxX = vertex['x'].toDouble();
-        if (vertex['y'] != null && vertex['y'] > maxY) maxY = vertex['y'].toDouble();
-      }
-    }
-
-    if (maxX == 0 || maxY == 0) return densityMap;
-
-    // Populate density map
-    for (var annotation in response['textAnnotations']) {
-      if (annotation['boundingPoly'] == null || annotation['boundingPoly']['vertices'] == null) {
-        continue;
-      }
-
-      final vertices = annotation['boundingPoly']['vertices'];
-      if (vertices.length < 4) continue;
-
-      // Calculate normalized center position
-      final centerX = (vertices[0]['x'] + vertices[1]['x'] + vertices[2]['x'] + vertices[3]['x']) / 4 / maxX;
-      final centerY = (vertices[0]['y'] + vertices[1]['y'] + vertices[2]['y'] + vertices[3]['y']) / 4 / maxY;
-
-      // Map to grid cell
-      final gridX = (centerX * (gridSize - 1)).round();
-      final gridY = (centerY * (gridSize - 1)).round();
-
-      if (gridX >= 0 && gridX < gridSize && gridY >= 0 && gridY < gridSize) {
-        densityMap['cells'][gridY][gridX]++;
-      }
-    }
-  } catch (e) {
-    print('Error generating text density map: $e');
-  }
-
-  return densityMap;
-}
-
-/// Calculate overall confidence of OCR results
-double _calculateOverallConfidence(Map<String, dynamic> response) {
-  double confidence = 0.0;
-  int count = 0;
-
-  try {
-    if (response['fullTextAnnotation'] != null &&
-        response['fullTextAnnotation']['pages'] != null) {
-      for (var page in response['fullTextAnnotation']['pages']) {
-        if (page['blocks'] != null) {
-          for (var block in page['blocks']) {
-            if (block['confidence'] != null) {
-              confidence += block['confidence'];
-              count++;
-            }
-          }
-        }
-      }
-    }
-  } catch (e) {
-    print('Error calculating confidence: $e');
-  }
-
-  return count > 0 ? confidence / count : 0.0;
-}
