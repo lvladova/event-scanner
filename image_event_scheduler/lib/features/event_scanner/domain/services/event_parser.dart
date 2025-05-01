@@ -1,4 +1,3 @@
-// lib/services/event_parser.dart
 import 'package:intl/intl.dart';
 import '../event_model.dart';
 import 'package:flutter/material.dart' show TimeOfDay;

@@ -92,8 +92,8 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
         _ocrText = extractedText;
       });
 
-      // Try to detect multiple events in the text
-      final events = await _extractMultipleEvents(extractedText);
+      // Extract multiple events using the hybrid parser
+      final events = await OCRHelper.extractMultipleEvents(extractedText);
 
       setState(() {
         _detectedEvents = events;
@@ -121,146 +121,6 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
       });
       DialogHelper.showRetryDialog(context, _createBlankEvent, _startOCR);
     }
-  }
-
-  // Method to extract multiple events from text
-  Future<List<EventModel>> _extractMultipleEvents(String text) async {
-    List<EventModel> events = [];
-
-    try {
-      // First try to parse as a single event
-      final singleEvent = await OCRHelper.tryParseEvent(text);
-      if (singleEvent != null) {
-        events.add(singleEvent);
-      }
-
-      // Split text by sections to find multiple events
-      final paragraphs = text.split('\n\n');
-
-      // Try to detect time ranges which might indicate separate events
-      final timeRangePattern = RegExp(r'\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}');
-      final timeMatches = timeRangePattern.allMatches(text);
-
-      // Extract events from time ranges
-      if (timeMatches.length > 1) {
-        for (var match in timeMatches) {
-          final timeRange = match.group(0)!;
-          final surroundingText = _getTextAroundMatch(text, match.start, match.end, 200);
-
-          // Extract just the start time from the range
-          final startTime = timeRange.split('-')[0].trim();
-
-          // Create event model with this time range
-          final rangeEvent = await OCRHelper.tryParseEvent(surroundingText);
-          if (rangeEvent != null) {
-            // Make sure it's not a duplicate of our main event
-            if (events.isEmpty || !_isSimilarEvent(events[0], rangeEvent)) {
-              events.add(rangeEvent);
-            }
-          }
-        }
-      }
-
-      // Look for address pattern which might indicate an event location
-      final addressPattern = RegExp(r'\d+\s+[A-Za-z]+(?:\s+[A-Za-z]+)*\s+(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Lane|Ln\.?|Drive|Dr\.?|Boulevard|Blvd\.?|Place|Pl\.?)');
-      final addressMatches = addressPattern.allMatches(text);
-
-      if (addressMatches.length > 1) {
-        for (var match in addressMatches) {
-          final address = match.group(0)!;
-          final surroundingText = _getTextAroundMatch(text, match.start, match.end, 200);
-
-          final locationEvent = await OCRHelper.tryParseEvent(surroundingText);
-          if (locationEvent != null) {
-            // Make sure location is set to the address we found
-            locationEvent.location = address;
-
-            // Add if not a duplicate
-            if (!events.any((e) => _isSimilarEvent(e, locationEvent))) {
-              events.add(locationEvent);
-            }
-          }
-        }
-      }
-
-      // Look for date patterns which might indicate separate events
-      final datePattern = RegExp(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?\s+\d{4}\b');
-      final dateMatches = datePattern.allMatches(text);
-
-      if (dateMatches.length > 1) {
-        for (var match in dateMatches) {
-          final date = match.group(0)!;
-          final surroundingText = _getTextAroundMatch(text, match.start, match.end, 200);
-
-          final dateEvent = await OCRHelper.tryParseEvent(surroundingText);
-          if (dateEvent != null && !events.any((e) => _isSimilarEvent(e, dateEvent))) {
-            events.add(dateEvent);
-          }
-        }
-      }
-
-      // Remove duplicates and very similar events
-      events = _removeDuplicateEvents(events);
-
-      // If no events were found, create at least one from the main text
-      if (events.isEmpty) {
-        final defaultEvent = await OCRHelper.tryParseEvent(text);
-        if (defaultEvent != null) {
-          events.add(defaultEvent);
-        } else {
-          // Create blank event as fallback
-          events.add(EventHelper.createBlankEvent());
-        }
-      }
-    } catch (e) {
-      print('Error extracting multiple events: $e');
-
-      // Fallback - at least return one event
-      final fallbackEvent = await OCRHelper.tryParseEvent(text);
-      if (fallbackEvent != null) {
-        events.add(fallbackEvent);
-      }
-    }
-
-    return events;
-  }
-
-  // Helper function to get text around a match
-  String _getTextAroundMatch(String text, int start, int end, int radius) {
-    final startIndex = (start - radius) < 0 ? 0 : (start - radius);
-    final endIndex = (end + radius) > text.length ? text.length : (end + radius);
-    return text.substring(startIndex, endIndex);
-  }
-
-  // Helper to check if two events are similar
-  bool _isSimilarEvent(EventModel event1, EventModel event2) {
-    // Consider them similar if any 2 of these are the same: title, date, time, location
-    int similarityCount = 0;
-
-    if (event1.title == event2.title) similarityCount++;
-    if (event1.date != null && event2.date != null &&
-        event1.date!.year == event2.date!.year &&
-        event1.date!.month == event2.date!.month &&
-        event1.date!.day == event2.date!.day) similarityCount++;
-    if (event1.time != null && event2.time != null &&
-        event1.time!.hour == event2.time!.hour &&
-        event1.time!.minute == event2.time!.minute) similarityCount++;
-    if (event1.location == event2.location) similarityCount++;
-
-    return similarityCount >= 2;
-  }
-
-  // Remove duplicate events
-  List<EventModel> _removeDuplicateEvents(List<EventModel> events) {
-    final uniqueEvents = <EventModel>[];
-
-    for (var event in events) {
-      if (!uniqueEvents.any((e) => _isSimilarEvent(e, event))) {
-        uniqueEvents.add(event);
-      }
-    }
-
-    return uniqueEvents;
   }
 
   void _showMultiEventDetectionModal(List<EventModel> events) {
@@ -361,7 +221,7 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
     );
   }
 
-  Future<void> _scheduleMultipleEvents(List<EventModel> events) async {
+  Future<void>_scheduleMultipleEvents(List<EventModel> events) async {
     if (events.isEmpty) return;
 
     setState(() => _isScheduling = true);
@@ -451,7 +311,10 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
                           events: _detectedEvents,
                           onEditEvent: _navigateToEventDetails,
                           onScheduleEvent: _scheduleEvent,
-                          onScheduleAll: _scheduleMultipleEvents,
+                          onScheduleAll: (events) async {
+                            // Convert the function signature
+                            await _scheduleMultipleEvents(events);
+                          },
                           selectedIndices: _selectedEventIndices,
                           onToggleSelection: _toggleEventSelection,
                           isScheduling: _isScheduling,
@@ -575,12 +438,12 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
                     color: Colors.red.withOpacity(0.8),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Row(
+                  child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.delete, color: Colors.white, size: 16),
-                      const SizedBox(width: 4),
-                      const Text(
+                      Icon(Icons.delete, color: Colors.white, size: 16),
+                      SizedBox(width: 4),
+                      Text(
                         'Delete',
                         style: TextStyle(color: Colors.white, fontSize: 12),
                       ),
@@ -639,10 +502,10 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
         children: [
           const Icon(Icons.info_outline, color: Colors.blue, size: 16),
           const SizedBox(width: 8),
-          const Expanded(
+          Expanded(
             child: Text(
-              'OCR text extracted successfully',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+              'Extracted ${_detectedEvents.length} event${_detectedEvents.length != 1 ? 's' : ''} from OCR text',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),
           TextButton(
@@ -650,9 +513,6 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
             child: const Text(
               'View Raw Text',
               style: TextStyle(color: Colors.blue, fontSize: 12),
-            ),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             ),
           ),
         ],

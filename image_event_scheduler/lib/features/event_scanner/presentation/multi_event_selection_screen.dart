@@ -176,18 +176,19 @@ class _MultiEventSelectionScreenState extends State<MultiEventSelectionScreen> {
           // Schedule title
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    widget.schedule.title,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: FuturisticTheme.primaryBlue,
-                    ),
+                Text(
+                  widget.schedule.title,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: FuturisticTheme.primaryBlue,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
+                const SizedBox(height: 4),
                 Text(
                   'Select events to schedule',
                   style: TextStyle(
@@ -208,8 +209,10 @@ class _MultiEventSelectionScreenState extends State<MultiEventSelectionScreen> {
                 color: FuturisticTheme.softBlue,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+              child: Wrap(
+                alignment: WrapAlignment.spaceAround,
+                spacing: 16.0,
+                runSpacing: 12.0,
                 children: [
                   _statItem('Total Events', _events.length.toString()),
                   _statItem('Selected', _selectedIndices.length.toString()),
@@ -257,30 +260,32 @@ class _MultiEventSelectionScreenState extends State<MultiEventSelectionScreen> {
                         color: Colors.white,
                       ),
                     ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          event.date != null ? event.formattedDate : 'No date',
-                          style: TextStyle(
-                            color: event.date != null ? Colors.white70 : Colors.orange,
-                          ),
-                        ),
-                        Text(
-                          event.time != null ? event.formattedTime : 'No time',
-                          style: TextStyle(
-                            color: event.time != null ? Colors.white70 : Colors.orange,
-                          ),
-                        ),
-                        if (event.location != "Location TBD")
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            event.location,
-                            style: TextStyle(color: Colors.white70),
-                            maxLines: 1,
+                            event.date != null ? event.formattedDate : 'No date',
+                            style: TextStyle(
+                              color: event.date != null ? Colors.white70 : Colors.orange,
+                            ),
                             overflow: TextOverflow.ellipsis,
                           ),
-                      ],
-                    ),
+                          Text(
+                            event.time != null ? event.formattedTime : 'No time',
+                            style: TextStyle(
+                              color: event.time != null ? Colors.white70 : Colors.orange,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (event.location != "Location TBD")
+                            Text(
+                              event.location,
+                              style: TextStyle(color: Colors.white70),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
                     onTap: () => _toggleSelection(index),
                     trailing: IconButton(
                       icon: Icon(Icons.edit),

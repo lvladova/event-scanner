@@ -3,322 +3,361 @@ import 'package:image_event_scheduler/shared/widgets/futuristic_widgets.dart';
 import 'package:image_event_scheduler/features/event_scanner/domain/event_model.dart';
 import 'package:image_event_scheduler/shared/theme/futuristic_theme.dart';
 
-class DetectedEventsCard extends StatefulWidget {
-  final List<EventModel> events;
-  final Function(EventModel) onEditEvent;
-  final Function(EventModel) onScheduleEvent;
-  final Function(List<EventModel>) onScheduleAll;
-  final List<int> selectedIndices;
-  final Function(int, bool) onToggleSelection;
-  final bool isScheduling;
+class MultiEventDetectionModal extends StatefulWidget {
+  final List<EventModel> detectedEvents;
+  final Function(EventModel) onSelectSingle;
+  final Function(List<EventModel>) onScheduleMultiple;
+  final Function() onCreateNew;
 
-  const DetectedEventsCard({
+  const MultiEventDetectionModal({
     Key? key,
-    required this.events,
-    required this.onEditEvent,
-    required this.onScheduleEvent,
-    required this.onScheduleAll,
-    required this.selectedIndices,
-    required this.onToggleSelection,
-    this.isScheduling = false,
+    required this.detectedEvents,
+    required this.onSelectSingle,
+    required this.onScheduleMultiple,
+    required this.onCreateNew,
   }) : super(key: key);
 
   @override
-  State<DetectedEventsCard> createState() => _DetectedEventsCardState();
+  State<MultiEventDetectionModal> createState() => _MultiEventDetectionModalState();
 }
 
-class _DetectedEventsCardState extends State<DetectedEventsCard> {
-  bool _isSelectionMode = false;
+class _MultiEventDetectionModalState extends State<MultiEventDetectionModal> {
+  final List<bool> _selectedEvents = [];
+  bool _selectMode = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize selection state for each event
+    _selectedEvents.addAll(List.generate(widget.detectedEvents.length, (_) => false));
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
-          child: Row(
-            children: [
-              Text(
-                'DETECTED EVENTS',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: FuturisticTheme.primaryBlue,
-                  letterSpacing: 1.2,
-                ),
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF121222),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: FuturisticTheme.primaryBlue.withOpacity(0.3),
+            blurRadius: 20,
+            spreadRadius: 5,
+          ),
+        ],
+      ),
+      margin: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            decoration: BoxDecoration(
+              color: FuturisticTheme.softBlue,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
               ),
-              if (widget.events.length > 1) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: FuturisticTheme.primaryBlue.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '(${widget.events.length})',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: FuturisticTheme.primaryBlue,
-                      fontWeight: FontWeight.bold,
-                    ),
+              border: Border.all(
+                color: FuturisticTheme.primaryBlue.withOpacity(0.5),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Multiple Events Detected',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: FuturisticTheme.primaryBlue,
                   ),
                 ),
-                const Spacer(),
-                // Multi-select toggle
-                TextButton.icon(
+                IconButton(
+                  icon: Icon(
+                    _selectMode ? Icons.check_box : Icons.check_box_outline_blank,
+                    color: FuturisticTheme.primaryBlue,
+                  ),
                   onPressed: () {
                     setState(() {
-                      _isSelectionMode = !_isSelectionMode;
+                      _selectMode = !_selectMode;
+                      // If toggling off select mode, clear selections
+                      if (!_selectMode) {
+                        _selectedEvents.fillRange(0, _selectedEvents.length, false);
+                      }
                     });
                   },
-                  icon: Icon(
-                    _isSelectionMode ? Icons.check_box : Icons.check_box_outline_blank,
-                    size: 18,
+                  tooltip: _selectMode ? 'Exit Selection Mode' : 'Select Multiple Events',
+                ),
+              ],
+            ),
+          ),
+
+          // Event List
+          Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.6,
+            ),
+            child: ListView.builder(
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: widget.detectedEvents.length,
+              itemBuilder: (context, index) {
+                final event = widget.detectedEvents[index];
+                return _buildEventTile(event, index);
+              },
+            ),
+          ),
+
+          // Action Buttons
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                // Only show multi-schedule button in select mode with at least one selection
+                if (_selectMode && _selectedEvents.contains(true))
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      final selectedEvents = <EventModel>[];
+                      for (int i = 0; i < _selectedEvents.length; i++) {
+                        if (_selectedEvents[i]) {
+                          selectedEvents.add(widget.detectedEvents[i]);
+                        }
+                      }
+                      widget.onScheduleMultiple(selectedEvents);
+                      Navigator.pop(context);
+                    },
+                    icon: const Icon(Icons.calendar_month),
+                    label: Text(
+                      'Schedule ${_selectedEvents.where((item) => item).length} Events',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF22A45D),
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                   ),
-                  label: Text(
-                    _isSelectionMode ? 'Done' : 'Select',
-                    style: const TextStyle(fontSize: 12),
+
+                // First event selection
+                if (!_selectMode)
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      if (widget.detectedEvents.isNotEmpty) {
+                        widget.onSelectSingle(widget.detectedEvents[0]);
+                        Navigator.pop(context);
+                      }
+                    },
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text(
+                      'Select First Event',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: FuturisticTheme.primaryBlue,
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                   ),
+
+                const SizedBox(height: 8),
+
+                // Create New Event button
+                TextButton.icon(
+                  onPressed: () {
+                    widget.onCreateNew();
+                    Navigator.pop(context);
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('Create New Event'),
                   style: TextButton.styleFrom(
-                    foregroundColor: FuturisticTheme.primaryBlue,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    foregroundColor: Colors.white70,
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEventTile(EventModel event, int index) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: _selectedEvents[index]
+            ? FuturisticTheme.primaryBlue.withOpacity(0.2)
+            : FuturisticTheme.softBlue,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _selectedEvents[index]
+              ? FuturisticTheme.primaryBlue
+              : Colors.transparent,
+          width: 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: () {
+          if (_selectMode) {
+            setState(() {
+              _selectedEvents[index] = !_selectedEvents[index];
+            });
+          } else {
+            widget.onSelectSingle(event);
+            Navigator.pop(context);
+          }
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // Selection checkbox or radio button
+              if (_selectMode)
+                Checkbox(
+                  value: _selectedEvents[index],
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedEvents[index] = value ?? false;
+                    });
+                  },
+                  activeColor: FuturisticTheme.primaryBlue,
+                )
+              else
+                Radio(
+                  value: index,
+                  groupValue: -1, // No default selection
+                  onChanged: (value) {
+                    widget.onSelectSingle(event);
+                    Navigator.pop(context);
+                  },
+                  activeColor: FuturisticTheme.primaryBlue,
+                ),
+
+              // Event information
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Title
+                    Text(
+                      event.title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    // Date & Time
+                    if (event.date != null || event.time != null)
+                      Row(
+                        children: [
+                          if (event.date != null)
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.calendar_today,
+                                  size: 14,
+                                  color: FuturisticTheme.primaryBlue,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  event.formattedDate,
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                          if (event.date != null && event.time != null)
+                            const Text(
+                              ' • ',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+
+                          if (event.time != null)
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.access_time,
+                                  size: 14,
+                                  color: FuturisticTheme.primaryBlue,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  event.formattedTime,
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
+                      )
+                    else
+                      Text(
+                        'No date/time detected',
+                        style: TextStyle(
+                          color: Colors.orange,
+                          fontSize: 12,
+                        ),
+                      ),
+
+                    // Location
+                    if (event.location != "Location TBD")
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.location_on,
+                            size: 14,
+                            color: FuturisticTheme.primaryBlue,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              event.location,
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+
+              // Edit button
+              IconButton(
+                icon: const Icon(
+                  Icons.edit,
+                  size: 20,
+                ),
+                onPressed: () {
+                  widget.onSelectSingle(event);
+                  Navigator.pop(context);
+                },
+                tooltip: 'Edit Event',
+              ),
             ],
           ),
         ),
-
-        if (widget.events.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: FuturisticTheme.softBlue,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Center(
-              child: Text(
-                'No events detected',
-                style: TextStyle(color: Colors.white70),
-              ),
-            ),
-          )
-        else
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: widget.events.length,
-            itemBuilder: (context, index) {
-              final event = widget.events[index];
-              final isSelected = widget.selectedIndices.contains(index);
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? FuturisticTheme.primaryBlue.withOpacity(0.15)
-                      : FuturisticTheme.softBlue,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isSelected
-                        ? FuturisticTheme.primaryBlue.withOpacity(0.8)
-                        : Colors.transparent,
-                    width: 1,
-                  ),
-                ),
-                child: InkWell(
-                  onTap: _isSelectionMode
-                      ? () {
-                    widget.onToggleSelection(index, !isSelected);
-                  }
-                      : null,
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        // Selection checkbox or radio button
-                        if (_isSelectionMode)
-                          Checkbox(
-                            value: isSelected,
-                            onChanged: (value) {
-                              widget.onToggleSelection(index, value ?? false);
-                            },
-                            activeColor: FuturisticTheme.primaryBlue,
-                          )
-                        else
-                          Radio<int>(
-                            value: index,
-                            groupValue: isSelected ? index : -1,
-                            onChanged: (value) {
-                              if (value != null) {
-                                widget.onToggleSelection(index, !isSelected);
-                              }
-                            },
-                            activeColor: FuturisticTheme.primaryBlue,
-                          ),
-
-                        // Event information
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Title
-                              Text(
-                                event.title,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-
-                              const SizedBox(height: 4),
-
-                              // Date & Time
-                              Row(
-                                children: [
-                                  if (event.date != null)
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          Icons.calendar_today,
-                                          size: 14,
-                                          color: FuturisticTheme.primaryBlue,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          event.formattedDate,
-                                          style: const TextStyle(
-                                            color: Colors.white70,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                  else if (event.time != null)
-                                  // Fall back to showing just time
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          Icons.access_time,
-                                          size: 14,
-                                          color: FuturisticTheme.primaryBlue,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          event.formattedTime,
-                                          style: const TextStyle(
-                                            color: Colors.white70,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                ],
-                              ),
-
-                              // Location
-                              if (event.location != "Location TBD")
-                                Row(
-                                  children: [
-                                    Icon(
-                                      Icons.location_on,
-                                      size: 14,
-                                      color: FuturisticTheme.primaryBlue,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Expanded(
-                                      child: Text(
-                                        event.location,
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                          fontSize: 12,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                            ],
-                          ),
-                        ),
-
-                        // Action buttons
-                        Row(
-                          children: [
-                            // Edit button
-                            IconButton(
-                              icon: const Icon(Icons.edit, size: 18),
-                              onPressed: () => widget.onEditEvent(event),
-                              tooltip: 'Edit Event',
-                              constraints: const BoxConstraints(),
-                              padding: const EdgeInsets.all(8),
-                            ),
-
-                            // Calendar button for individual scheduling
-                            if (!_isSelectionMode)
-                              IconButton(
-                                icon: const Icon(Icons.calendar_month, size: 18),
-                                onPressed: () => widget.onScheduleEvent(event),
-                                tooltip: 'Schedule Event',
-                                constraints: const BoxConstraints(),
-                                padding: const EdgeInsets.all(8),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-
-        // Multi-selection actions
-        if (_isSelectionMode && widget.selectedIndices.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 8.0),
-            child: ElevatedButton.icon(
-              onPressed: widget.isScheduling
-                  ? null
-                  : () {
-                final selectedEvents = widget.selectedIndices
-                    .map((i) => widget.events[i])
-                    .toList();
-                widget.onScheduleAll(selectedEvents);
-              },
-              icon: widget.isScheduling
-                  ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
-                  : const Icon(Icons.calendar_month),
-              label: Text(
-                widget.isScheduling
-                    ? 'Scheduling...'
-                    : 'Schedule ${widget.selectedIndices.length} Events',
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF22A45D),
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
-      ],
+      ),
     );
   }
 }

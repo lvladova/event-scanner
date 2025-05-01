@@ -1,12 +1,16 @@
 import 'dart:io';
+import 'package:flutter/material.dart';
 import '../features/event_scanner/domain/event_model.dart';
 import '../features/event_scanner/domain/services/vision_api_service.dart';
 import '../features/event_scanner/domain/services/event_parser.dart';
 import '../features/event_scanner/domain/services/natural_language_service.dart';
+import '../features/event_scanner/domain/services/hybrid_event_parser.dart';
 import '../config.dart';
-import 'package:flutter/material.dart';
 
 class OCRHelper {
+  // Initialize the Hybrid Parser
+  static final _hybridParser = HybridEventParser(Config.geminiApiKey);
+
   /// Extract only the raw text from an image
   static Future<String> extractTextOnly(File image) async {
     try {
@@ -17,32 +21,32 @@ class OCRHelper {
     }
   }
 
-  /// Enhanced extraction that gets both text and structured information
-  static Future<Map<String, dynamic>> extractStructuredText(File image) async {
-    try {
-      // Call the enhanced Vision API function
-      return await extractTextAndStructureFromImage(image, Config.visionApiKey);
-    } catch (e) {
-      print('Enhanced OCR failed: $e');
-      // Return a fallback structure
-      return {
-        'rawText': '',
-        'blocks': [],
-        'paragraphs': [],
-        'success': false,
-        'error': e.toString(),
-      };
+  /// Extract multiple events from text using the hybrid parser
+  static Future<List<EventModel>> extractMultipleEvents(String text) async {
+    if (Config.useGeminiParser) {
+      try {
+        // Use hybrid parser that tries Gemini first, then falls back to traditional
+        final events = await _hybridParser.extractEvents(text);
+        if (events.isNotEmpty) {
+          return events;
+        }
+      } catch (e) {
+        print('Hybrid parser failed: $e');
+      }
     }
+
+    // Fallback to single event parsing if hybrid fails
+    final event = await tryParseEvent(text);
+    return event != null ? [event] : [];
   }
 
-  /// Parse text into an EventModel
+  /// Parse text into a single EventModel using traditional or NLP methods
   static Future<EventModel?> tryParseEvent(String text) async {
     if (Config.useNaturalLanguageAPI) {
       try {
         return await NaturalLanguageService.extractEventEntities(text, Config.visionApiKey);
       } catch (e) {
         print('NLP parsing failed: $e');
-        // Fallback
       }
     }
     try {
@@ -53,89 +57,109 @@ class OCRHelper {
     }
   }
 
-  /// Parse structured text data into an EventModel
-  static Future<EventModel?> tryParseStructuredEvent(Map<String, dynamic> structuredData) async {
+  /// Enhanced extraction that gets both text and structured information
+  static Future<Map<String, dynamic>> extractStructuredText(File image) async {
     try {
-      // First extract the raw text for compatibility with existing parsers
-      final String rawText = structuredData['rawText'] ?? '';
+      return await extractTextAndStructureFromImage(image, Config.visionApiKey);
+    } catch (e) {
+      print('Enhanced OCR failed: $e');
+      return {
+        'rawText': '',
+        'blocks': [],
+        'paragraphs': [],
+        'success': false,
+        'error': e.toString(),
+      };
+    }
+  }
 
-      // Use existing parsers first for compatibility
-      EventModel? event = await tryParseEvent(rawText);
+  /// Process an image and extract event information, potentially multiple events
+  static Future<List<EventModel>> processEventImage(File image, {bool detectMultiple = true}) async {
+    List<EventModel> detectedEvents = [];
+    String textToParse = '';
+    Map<String, dynamic>? structuredData;
 
-      // If we couldn't parse it with existing methods, or we want to enhance the result
-      if (event == null || event.title == "Untitled Event") {
-        // Extract event data using the structured information
-        final eventData = extractEventData(structuredData);
+    try {
+      // Step 1: Extract text (prefer structured if available)
+      structuredData = await extractStructuredText(image);
+      if (structuredData['success'] == true && structuredData['rawText'] != null && structuredData['rawText'].isNotEmpty) {
+        textToParse = structuredData['rawText'];
+      } else {
+        textToParse = await extractTextOnly(image);
+        structuredData = null;
+      }
 
-        // Create or enhance the event model
-        if (event == null) {
-          event = EventModel();
-        }
+      if (textToParse.isEmpty) {
+        print('No text extracted from image.');
+        return [_createDefaultEvent("No text found in image.")];
+      }
 
-        // Set title if detected and not already set
-        if (eventData['titles'].isNotEmpty && (event.title == "Untitled Event" || event.title.isEmpty)) {
-          event.title = eventData['titles'][0];
-        }
-
-        // Set date if detected and not already set
-        if (eventData['dates'].isNotEmpty && event.date == null) {
-          // We'd need more sophisticated date parsing here
-          // This is a placeholder - in a real implementation, you'd convert the date string to DateTime
-          final dateString = eventData['dates'][0];
-          try {
-            // This is a simplistic approach - you'd need more robust parsing
-            final date = DateTime.parse(dateString);
-            event.date = date;
-          } catch (e) {
-            print('Failed to parse date: $dateString, error: $e');
-          }
-        }
-
-        // Set time if detected and not already set
-        if (eventData['times'].isNotEmpty && event.time == null) {
-          // We'd need more sophisticated time parsing here
-          // This is a placeholder - in a real implementation, you'd convert the time string to TimeOfDay
-          final timeString = eventData['times'][0];
-          try {
-            // Very simplistic approach - you'd need more robust parsing
-            // Format expected: HH:MM AM/PM
-            final parts = timeString.split(':');
-            if (parts.length >= 2) {
-              int hour = int.parse(parts[0]);
-
-              // Handle minutes and AM/PM
-              String minutePart = parts[1];
-              int minute = 0;
-              bool isPM = false;
-
-              // Extract minutes
-              final minuteMatch = RegExp(r'\d{1,2}').firstMatch(minutePart);
-              if (minuteMatch != null) {
-                minute = int.parse(minuteMatch.group(0)!);
-              }
-
-              // Check for AM/PM
-              isPM = minutePart.toLowerCase().contains('pm');
-              if (isPM && hour < 12) {
-                hour += 12;
-              } else if (!isPM && hour == 12) {
-                hour = 0;
-              }
-
-              event.time = TimeOfDay(hour: hour, minute: minute);
-            }
-          } catch (e) {
-            print('Failed to parse time: $timeString, error: $e');
-          }
-        }
-
-        // Set location if detected and not already set
-        if (eventData['locations'].isNotEmpty &&
-            (event.location == "Location TBD" || event.location.isEmpty)) {
-          event.location = eventData['locations'][0];
+      // Step 2: Extract multiple events using hybrid parser
+      if (detectMultiple) {
+        detectedEvents = await extractMultipleEvents(textToParse);
+        if (detectedEvents.isNotEmpty) {
+          return detectedEvents;
         }
       }
 
+      // Step 3: Fallback to single event if no multiple events detected
+      final event = await tryParseEvent(textToParse);
+      if (event != null) {
+        detectedEvents.add(event);
+      }
+
+      // Step 4: If still no events detected, create a default one
+      if (detectedEvents.isEmpty) {
+        print('No specific events detected, creating default event.');
+        detectedEvents.add(_createDefaultEvent(textToParse));
+      }
+
+      return detectedEvents;
+
+    } catch (e) {
+      print('Error processing event image: $e');
+      return [_createDefaultEvent("Error processing image: $e")];
+    }
+  }
+
+  /// Parse structured text data into a single EventModel
+  static Future<EventModel?> tryParseStructuredEvent(Map<String, dynamic> structuredData) async {
+    try {
+      final String rawText = structuredData['rawText'] as String? ?? '';
+      EventModel? event = await tryParseEvent(rawText);
+
+      if (event == null || event.title == "Untitled Event" || event.date == null || event.time == null || event.location == "Location TBD") {
+        final eventData = extractEventData(structuredData);
+        event ??= EventModel();
+
+        final titles = eventData['titles'];
+        if (titles != null && titles.isNotEmpty && (event.title == "Untitled Event" || event.title.isEmpty)) {
+          event.title = titles[0];
+        }
+
+        final dates = eventData['dates'];
+        if (dates != null && dates.isNotEmpty && event.date == null) {
+          try {
+            event.date = DateTime.parse(dates[0]);
+          } catch (e) {
+            print('Failed to parse structured date: ${dates[0]}, error: $e');
+          }
+        }
+
+        final times = eventData['times'];
+        if (times != null && times.isNotEmpty && event.time == null) {
+          try {
+            event.time = _parseTimeOfDay(times[0]);
+          } catch (e) {
+            print('Failed to parse structured time: ${times[0]}, error: $e');
+          }
+        }
+
+        final locations = eventData['locations'];
+        if (locations != null && locations.isNotEmpty && (event.location == "Location TBD" || event.location.isEmpty)) {
+          event.location = locations[0];
+        }
+      }
       return event;
     } catch (e) {
       print('Structured parsing failed: $e');
@@ -143,107 +167,83 @@ class OCRHelper {
     }
   }
 
-  /// Process an image and extract event information, using the most appropriate method
-  static Future<List<EventModel>> processEventImage(File image, {bool detectMultiple = true}) async {
-    List<EventModel> detectedEvents = [];
+  // Helper to create a default event model
+  static EventModel _createDefaultEvent(String description) {
+    return EventModel(
+      title: "New Event",
+      date: DateTime.now(),
+      time: TimeOfDay.now(),
+      location: "Location TBD",
+      description: description,
+    );
+  }
 
-    try {
-      // Use the enhanced extraction if available
-      final structuredData = await extractStructuredText(image);
+  // Helper function to extract event data from structured data
+  static Map<String, List<String>> extractEventData(Map<String, dynamic> structuredData) {
+    final titles = <String>[];
+    final dates = <String>[];
+    final times = <String>[];
+    final locations = <String>[];
 
-      // Check if we successfully extracted structured data
-      if (structuredData['success'] == true) {
-        // Try to parse using structured data
-        final event = await tryParseStructuredEvent(structuredData);
-        if (event != null) {
-          detectedEvents.add(event);
-        }
+    final blocks = structuredData['blocks'] as List<dynamic>? ?? [];
+    for (final block in blocks) {
+      final text = block['text'] as String? ?? '';
 
-        // If we should detect multiple events
-        if (detectMultiple && Config.enableMultiEventDetection) {
-          // Try to detect multiple events from blocks or paragraphs
-          final blocks = structuredData['blocks'] as List<dynamic>;
-          if (blocks.length > 1) {
-            // Process each major text block as a potential separate event
-            for (int i = 0; i < blocks.length; i++) {
-              // Skip the first block if we already processed it
-              if (i == 0 && detectedEvents.isNotEmpty) continue;
-
-              final block = blocks[i];
-              final blockText = block['text'] as String? ?? '';
-
-              // Only process blocks with enough text
-              if (blockText.length > 20) {
-                final blockEvent = await tryParseEvent(blockText);
-                if (blockEvent != null &&
-                    // Avoid duplicate events
-                    !detectedEvents.any((e) => e.title == blockEvent.title)) {
-                  detectedEvents.add(blockEvent);
-                }
-              }
-            }
-          }
-        }
-      } else {
-        // Fallback to traditional text extraction if structured extraction failed
-        final rawText = await extractTextOnly(image);
-        if (rawText.isNotEmpty) {
-          // Try to parse a single event
-          final event = await tryParseEvent(rawText);
-          if (event != null) {
-            detectedEvents.add(event);
-          }
-
-          // If we should detect multiple events
-          if (detectMultiple && Config.enableMultiEventDetection) {
-            // Try to split the text into multiple sections
-            final sections = rawText.split(RegExp(r'\n{3,}'));
-            if (sections.length > 1) {
-              // Process each section as a potential separate event
-              for (int i = 0; i < sections.length; i++) {
-                // Skip the first section if we already processed it
-                if (i == 0 && detectedEvents.isNotEmpty) continue;
-
-                final section = sections[i];
-
-                // Only process sections with enough text
-                if (section.length > 20) {
-                  final sectionEvent = await tryParseEvent(section);
-                  if (sectionEvent != null &&
-                      // Avoid duplicate events
-                      !detectedEvents.any((e) => e.title == sectionEvent.title)) {
-                    detectedEvents.add(sectionEvent);
-                  }
-                }
-              }
-            }
-          }
-        }
+      // Simple extraction patterns - you can enhance these
+      if (text.contains(RegExp(r'\d{4}')) && text.contains(RegExp(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', caseSensitive: false))) {
+        dates.add(text);
       }
 
-      // If we couldn't detect any events, create a blank one
-      if (detectedEvents.isEmpty) {
-        detectedEvents.add(EventModel(
-          title: "New Event",
-          date: DateTime.now(),
-          time: TimeOfDay.now(),
-          location: "Location TBD",
-          description: structuredData['rawText'] ?? "",
-        ));
+      if (text.contains(RegExp(r'\d{1,2}:\d{2}')) || text.contains(RegExp(r'(AM|PM)', caseSensitive: false))) {
+        times.add(text);
       }
 
-      return detectedEvents;
-    } catch (e) {
-      print('Error processing event image: $e');
-      // Return a blank event on error
-      return [EventModel(
-        title: "New Event",
-        date: DateTime.now(),
-        time: TimeOfDay.now(),
-        location: "Location TBD",
-        description: "Error processing image: $e",
-      )];
+      if (text.contains('Room') || text.contains('Hall') || text.contains('Street') || text.contains('Avenue')) {
+        locations.add(text);
+      }
+
+      if (text.length > 5 && text.length < 50 && !dates.contains(text) && !times.contains(text) && !locations.contains(text)) {
+        titles.add(text);
+      }
     }
+
+    return {
+      'titles': titles,
+      'dates': dates,
+      'times': times,
+      'locations': locations,
+    };
+  }
+
+  // Helper to parse TimeOfDay robustly
+  static TimeOfDay? _parseTimeOfDay(String timeString) {
+    try {
+      final parts = timeString.split(':');
+      if (parts.length >= 2) {
+        int hour = int.parse(parts[0]);
+        String minutePart = parts[1];
+        int minute = 0;
+        bool isPM = false;
+
+        final minuteMatch = RegExp(r'\d{1,2}').firstMatch(minutePart);
+        if (minuteMatch != null) {
+          minute = int.parse(minuteMatch.group(0)!);
+        }
+
+        isPM = minutePart.toLowerCase().contains('pm');
+        if (isPM && hour < 12) {
+          hour += 12;
+        } else if (!isPM && hour == 12) {
+          hour = 0;
+        }
+
+        if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+          return TimeOfDay(hour: hour, minute: minute);
+        }
+      }
+    } catch (e) {
+      print('Failed to parse time string: $timeString, error: $e');
+    }
+    return null;
   }
 }
-
