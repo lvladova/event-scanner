@@ -47,143 +47,154 @@ class _MultiEventDetectionModalState extends State<MultiEventDetectionModal> {
         ],
       ),
       margin: const EdgeInsets.all(16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-            decoration: BoxDecoration(
-              color: FuturisticTheme.softBlue,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(16),
-              ),
-              border: Border.all(
-                color: FuturisticTheme.primaryBlue.withOpacity(0.5),
-                width: 1,
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Multiple Events Detected',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: FuturisticTheme.primaryBlue,
+      // Using LayoutBuilder to get the available space
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                decoration: BoxDecoration(
+                  color: FuturisticTheme.softBlue,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                  ),
+                  border: Border.all(
+                    color: FuturisticTheme.primaryBlue.withOpacity(0.5),
+                    width: 1,
                   ),
                 ),
-                IconButton(
-                  icon: Icon(
-                    _selectMode ? Icons.check_box : Icons.check_box_outline_blank,
-                    color: FuturisticTheme.primaryBlue,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _selectMode = !_selectMode;
-                      // If toggling off select mode, clear selections
-                      if (!_selectMode) {
-                        _selectedEvents.fillRange(0, _selectedEvents.length, false);
-                      }
-                    });
-                  },
-                  tooltip: _selectMode ? 'Exit Selection Mode' : 'Select Multiple Events',
-                ),
-              ],
-            ),
-          ),
-
-          // Event List
-          Container(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.6,
-            ),
-            child: ListView.builder(
-              shrinkWrap: true,
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: widget.detectedEvents.length,
-              itemBuilder: (context, index) {
-                final event = widget.detectedEvents[index];
-                return _buildEventTile(event, index);
-              },
-            ),
-          ),
-
-          // Action Buttons
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                // Only show multi-schedule button in select mode with at least one selection
-                if (_selectMode && _selectedEvents.contains(true))
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      final selectedEvents = <EventModel>[];
-                      for (int i = 0; i < _selectedEvents.length; i++) {
-                        if (_selectedEvents[i]) {
-                          selectedEvents.add(widget.detectedEvents[i]);
-                        }
-                      }
-                      widget.onScheduleMultiple(selectedEvents);
-                      Navigator.pop(context);
-                    },
-                    icon: const Icon(Icons.calendar_month),
-                    label: Text(
-                      'Schedule ${_selectedEvents.where((item) => item).length} Events',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF22A45D),
-                      minimumSize: const Size(double.infinity, 48),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Using Flexible to ensure text doesn't overflow
+                    Flexible(
+                      child: Text(
+                        'Multiple Events Detected',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: FuturisticTheme.primaryBlue,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  ),
+                    IconButton(
+                      icon: Icon(
+                        _selectMode ? Icons.check_box : Icons.check_box_outline_blank,
+                        color: FuturisticTheme.primaryBlue,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _selectMode = !_selectMode;
+                          if (!_selectMode) {
+                            _selectedEvents.fillRange(0, _selectedEvents.length, false);
+                          }
+                        });
+                      },
+                      tooltip: _selectMode ? 'Exit Selection Mode' : 'Select Multiple Events',
+                    ),
+                  ],
+                ),
+              ),
 
-                // First event selection
-                if (!_selectMode)
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      if (widget.detectedEvents.isNotEmpty) {
-                        widget.onSelectSingle(widget.detectedEvents[0]);
+              // Event List - Using Expanded within a limited height container
+              Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.5, // Reduced from 0.6
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: widget.detectedEvents.length,
+                  itemBuilder: (context, index) {
+                    final event = widget.detectedEvents[index];
+                    return _buildEventTile(event, index);
+                  },
+                ),
+              ),
+
+              // Action Buttons
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min, // Ensure only takes needed space
+                  children: [
+                    // Only show multi-schedule button in select mode with at least one selection
+                    if (_selectMode && _selectedEvents.contains(true))
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          final selectedEvents = <EventModel>[];
+                          for (int i = 0; i < _selectedEvents.length; i++) {
+                            if (_selectedEvents[i]) {
+                              selectedEvents.add(widget.detectedEvents[i]);
+                            }
+                          }
+                          widget.onScheduleMultiple(selectedEvents);
+                          Navigator.pop(context);
+                        },
+                        icon: const Icon(Icons.calendar_month),
+                        label: Text(
+                          'Schedule ${_selectedEvents.where((item) => item).length} Events',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF22A45D),
+                          minimumSize: const Size(double.infinity, 48),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+
+                    // First event selection
+                    if (!_selectMode)
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          if (widget.detectedEvents.isNotEmpty) {
+                            widget.onSelectSingle(widget.detectedEvents[0]);
+                            Navigator.pop(context);
+                          }
+                        },
+                        icon: const Icon(Icons.check_circle_outline),
+                        label: const Text(
+                          'Select First Event',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: FuturisticTheme.primaryBlue,
+                          minimumSize: const Size(double.infinity, 48),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+
+                    const SizedBox(height: 8),
+
+                    // Create New Event button
+                    TextButton.icon(
+                      onPressed: () {
+                        widget.onCreateNew();
                         Navigator.pop(context);
-                      }
-                    },
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text(
-                      'Select First Event',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: FuturisticTheme.primaryBlue,
-                      minimumSize: const Size(double.infinity, 48),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create New Event'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.white70,
                       ),
                     ),
-                  ),
-
-                const SizedBox(height: 8),
-
-                // Create New Event button
-                TextButton.icon(
-                  onPressed: () {
-                    widget.onCreateNew();
-                    Navigator.pop(context);
-                  },
-                  icon: const Icon(Icons.add),
-                  label: const Text('Create New Event'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.white70,
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-        ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -218,6 +229,7 @@ class _MultiEventDetectionModalState extends State<MultiEventDetectionModal> {
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start, // Align to top
             children: [
               // Selection checkbox or radio button
               if (_selectMode)
@@ -253,16 +265,20 @@ class _MultiEventDetectionModalState extends State<MultiEventDetectionModal> {
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                       ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
                     ),
 
                     const SizedBox(height: 4),
 
-                    // Date & Time
+                    // Date & Time - Using Wrap instead of Row
                     if (event.date != null || event.time != null)
-                      Row(
+                      Wrap(
+                        spacing: 8,
                         children: [
                           if (event.date != null)
                             Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
                                   Icons.calendar_today,
@@ -272,7 +288,7 @@ class _MultiEventDetectionModalState extends State<MultiEventDetectionModal> {
                                 const SizedBox(width: 4),
                                 Text(
                                   event.formattedDate,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     color: Colors.white70,
                                     fontSize: 12,
                                   ),
@@ -280,14 +296,9 @@ class _MultiEventDetectionModalState extends State<MultiEventDetectionModal> {
                               ],
                             ),
 
-                          if (event.date != null && event.time != null)
-                            const Text(
-                              ' • ',
-                              style: TextStyle(color: Colors.white70),
-                            ),
-
                           if (event.time != null)
                             Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
                                   Icons.access_time,
@@ -297,7 +308,7 @@ class _MultiEventDetectionModalState extends State<MultiEventDetectionModal> {
                                 const SizedBox(width: 4),
                                 Text(
                                   event.formattedTime,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     color: Colors.white70,
                                     fontSize: 12,
                                   ),
@@ -307,7 +318,7 @@ class _MultiEventDetectionModalState extends State<MultiEventDetectionModal> {
                         ],
                       )
                     else
-                      Text(
+                      const Text(
                         'No date/time detected',
                         style: TextStyle(
                           color: Colors.orange,
@@ -328,7 +339,7 @@ class _MultiEventDetectionModalState extends State<MultiEventDetectionModal> {
                           Expanded(
                             child: Text(
                               event.location,
-                              style: TextStyle(
+                              style: const TextStyle(
                                 color: Colors.white70,
                                 fontSize: 12,
                               ),
@@ -353,6 +364,8 @@ class _MultiEventDetectionModalState extends State<MultiEventDetectionModal> {
                   Navigator.pop(context);
                 },
                 tooltip: 'Edit Event',
+                constraints: const BoxConstraints(), // Remove constraints for smaller touch area
+                padding: EdgeInsets.zero,
               ),
             ],
           ),

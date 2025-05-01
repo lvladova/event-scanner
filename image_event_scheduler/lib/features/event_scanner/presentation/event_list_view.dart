@@ -8,6 +8,7 @@ class EventListView extends StatelessWidget {
   final Function(EventModel) onEventSelected;
   final Function(EventModel) onEventEdit;
   final Function(EventModel) onEventSchedule;
+  final Function(EventModel) onEventDelete;
   final bool isScheduling;
 
   const EventListView({
@@ -17,6 +18,7 @@ class EventListView extends StatelessWidget {
     required this.onEventSelected,
     required this.onEventEdit,
     required this.onEventSchedule,
+    required this.onEventDelete,
     this.isScheduling = false,
   }) : super(key: key);
 
@@ -140,6 +142,11 @@ class EventListView extends StatelessWidget {
                           : () => onEventSchedule(event),
                       tooltip: 'Schedule',
                     ),
+                    IconButton(
+                      icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                      onPressed: () => _confirmDelete(context, event),
+                      tooltip: 'Delete',
+                    ),
                   ],
                 ),
                 onTap: () => onEventSelected(event),
@@ -173,6 +180,31 @@ class EventListView extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+
+  void _confirmDelete(BuildContext context, EventModel event) {
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Event'),
+          content: Text('Are you sure you want to delete "${event.title}"?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('CANCEL'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                onEventDelete(event);
+              },
+              child: const Text('DELETE', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
     );
   }
 }

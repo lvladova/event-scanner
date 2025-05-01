@@ -28,8 +28,14 @@ class EventDetailsCard extends StatelessWidget {
             children: [
               const Icon(Icons.event_note, color: Colors.blue),
               const SizedBox(width: 8),
-              const Text('Event Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-              const Spacer(),
+              const Expanded(  // Added Expanded to prevent overflow
+                child: Text(
+                  'Event Details',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               IconButton(
                 icon: const Icon(Icons.edit),
                 onPressed: onEdit,
@@ -39,78 +45,162 @@ class EventDetailsCard extends StatelessWidget {
           const SizedBox(height: 16),
 
           // Title
-          Text(
-            event.title,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),  // Added padding
+            child: Text(
+              event.title,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              maxLines: 2,  // Allow two lines for title
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
           const SizedBox(height: 12),
 
-          // Date and Time
-          Row(
-            children: [
-              const Icon(Icons.calendar_today, size: 16, color: Colors.blue),
-              const SizedBox(width: 8),
-              Text(event.formattedDate),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.access_time, size: 16, color: Colors.blue),
-              const SizedBox(width: 8),
-              Text(event.formattedTime),
-            ],
+          // Date and Time - Responsive layout
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth < 300) {
+                  // Narrow screen: stack vertically
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildDateTimeItem(Icons.calendar_today, event.formattedDate),
+                      const SizedBox(height: 8),
+                      _buildDateTimeItem(Icons.access_time, event.formattedTime),
+                    ],
+                  );
+                } else {
+                  // Wide screen: row layout
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: _buildDateTimeItem(Icons.calendar_today, event.formattedDate),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildDateTimeItem(Icons.access_time, event.formattedTime),
+                      ),
+                    ],
+                  );
+                }
+              },
+            ),
           ),
           const SizedBox(height: 8),
 
           // Location
-          Row(
-            children: [
-              const Icon(Icons.location_on, size: 16, color: Colors.blue),
-              const SizedBox(width: 8),
-              Expanded(child: Text(event.location)),
-            ],
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,  // Better for multiline text
+              children: [
+                const Icon(Icons.location_on, size: 16, color: Colors.blue),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    event.location,
+                    maxLines: 2,  // Allow multiple lines for location
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 24),
 
-          // Action Buttons
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit),
-                  label: const Text('Edit Details'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: isScheduling ? null : onSchedule,
-                  icon: isScheduling
-                      ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                      : const Icon(Icons.calendar_month),
-                  label: Text(isScheduling ? 'Scheduling...' : 'Schedule'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF22A45D),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
-            ],
+          // Action Buttons - Responsive layout
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth < 300) {
+                  // Narrow screen: stack buttons vertically
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildEditButton(),
+                      const SizedBox(height: 8),
+                      _buildScheduleButton(),
+                    ],
+                  );
+                } else {
+                  // Wide screen: horizontal layout
+                  return Row(
+                    children: [
+                      Expanded(child: _buildEditButton()),
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildScheduleButton()),
+                    ],
+                  );
+                }
+              },
+            ),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildDateTimeItem(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.blue.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Colors.blue),
+          const SizedBox(width: 8),
+          Expanded(  // Added Expanded to prevent overflow
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditButton() {
+    return ElevatedButton.icon(
+      onPressed: onEdit,
+      icon: const Icon(Icons.edit),
+      label: const Text(
+        'Edit Details',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.blue,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+    );
+  }
+
+  Widget _buildScheduleButton() {
+    return ElevatedButton.icon(
+      onPressed: isScheduling ? null : onSchedule,
+      icon: isScheduling
+          ? const SizedBox(
+        width: 16,
+        height: 16,
+        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+      )
+          : const Icon(Icons.calendar_month),
+      label: Text(
+        isScheduling ? 'Scheduling...' : 'Schedule',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF22A45D),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+    );
+  }
 }
-
-
