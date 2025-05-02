@@ -92,8 +92,6 @@ Return ONLY a structured JSON array like this example:
     "title": "Team Meeting",
     "date": "2025-05-03",
     "start_time": "13:00",
-    "end_time": "14:00",
-    "duration_minutes": 60,
     "location": "Room 403, Building A"
   }
 ]
@@ -453,9 +451,9 @@ Do NOT include any explanations, only pure JSON. If no events found, return an e
     }
 
     TimeOfDay? time;
-    if (json['time'] != null) {
+    if (json['start_time'] != null) {
       try {
-        final timeString = json['time'].toString();
+        final timeString = json['start_time'].toString();
         final timeRegex = RegExp(r'(\d{1,2}):(\d{2})');
         final match = timeRegex.firstMatch(timeString);
 
@@ -466,7 +464,7 @@ Do NOT include any explanations, only pure JSON. If no events found, return an e
           );
         }
       } catch (e) {
-        print('Could not parse time: ${json['time']}');
+        print('Could not parse start_time: ${json['start_time']}');
       }
     }
 

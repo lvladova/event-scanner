@@ -68,7 +68,7 @@ class EventHelper {
     }
   }
 
-  // New method to handle bulk scheduling multiple events
+  // method to handle bulk scheduling multiple events
   static Future<void> scheduleMultipleEvents(
       BuildContext context,
       List<EventModel> events,
