@@ -51,53 +51,82 @@ class HybridEventParser {
     print('Gemini extraction: Processing ${truncatedText.length} characters of OCR text');
 
     final String prompt = '''
-Extract ALL calendar events accurately from the OCR-scanned text provided below.
+You are an expert in parsing messy OCR-scanned text of screenshots, emails, chat messages, or promotional material, into structured calendar events like tickets, event posters, booking confirmations, work schedules, Concerts Reservations and all the other types of events. 
 
-For each detected event, return a structured JSON object strictly following the specifications:
+The text may come from screenshots, emails, chat messages, or promotional material.
 
-- "title": A clear and meaningful title for the event.
-  - Prioritize explicit event names or titles clearly stated.
-  - If an explicit title is absent, infer a relevant title based on context (e.g., "Meeting", "Conference", "Appointment").
-  - Avoid default titles such as "Untitled Event" unless absolutely no context is provided.
+The OCR text below contains a schedule with multiple events or just one, where:
+- **Dates and times may be separated by line breaks**.
+- Events may be inconsistently formatted.
+- Some lines may contain only a date, only a time, or only a location.
+- If there is some type of location mentioned for example "Restaurant", use it as part of the structured event.
 
-- "date": The event date explicitly mentioned or inferred, in STRICT YYYY-MM-DD format.
-  - If a year isn't mentioned, assume the current year (2024).
-  - If no clear date is available, use null.
+📌 **Your goal** is to return a list of structured calendar events or just one event, in the following strict format:
 
-- "start_time": Event start time explicitly stated or inferred, STRICTLY in 24-hour format HH:MM.
-  - If start time cannot be inferred clearly, return null.
+Each object must include only these fields:
+- "title": A descriptive event title, like "2.0 ASM". If not available, infer from context. Do NOT use "Untitled Event".
+- "date": The full date in YYYY-MM-DD format. If the year is missing, assume 2025.
+- "start_time": Start time in 24-hour format (HH:MM). If a time range is given, use the start time. If no time is found, return null.
+- "location": Use the full location string if stated. Return null if no location is mentioned.
 
-- "end_time": Event end time explicitly stated or inferred, STRICTLY in 24-hour format HH:MM.
-  - Return null if end time is not mentioned clearly.
+🧠 **CRITICAL INSTRUCTION**:
+If a line contains a date (e.g., "Apr 14") and a few lines below it contains a time (e.g., "09:56 - 22:02"), and no other date appears between them, you MUST associate that time with the previous date. This means you must treat lines together **even if separated** by blank lines or unrelated headers.
+⚠️ Instructions:
+- The OCR text may include broken formatting and inconsistent spacing.
+- Events may not have all fields on the same line.
+- If a date appears in the text (e.g., "Apr 14") and a time appears a few lines below (e.g., "09:56 - 22:02"), and no other date appears in between, associate the time with the most recent date.
+- Do NOT assume that lines must be adjacent — relate fields logically based on order, not just position.
+- 🚫 Do NOT include "Day Off" entries or any lines that indicate time off, holidays, or absence. These are not events and must be excluded entirely.
+- Do NOT fabricate missing information. Use null for fields not clearly present.
+- Return only valid calendar events with at least a title and date.
+- If several dates (e.g., May 20 to May 23) appear with no event text, treat them as **empty days**, not connected to any following event. Do NOT assign the next event’s time or title to the last of these dates. Only assign a date if it is immediately followed by or near a time/title block.
+- If day names appear in other languages (e.g., “Lun” for Monday, “Frei” for Friday), normalize them to English when converting to dates.
+- Dates may appear in formats like "Apr 1", "April 1st", "1 Apr", or "Mon, Apr 1". Normalize to YYYY-MM-DD assuming year = 2025 unless otherwise stated.
+- Prefer specific titles like "2.0 ASM" over generic UI labels or app headers (e.g., "MyALDI", "News by Topic").
+- Do not duplicate events. If the same date and time appear more than once, only extract it once.
+- If multiple lines refer to the same event (e.g., date, then title, then time), treat them as one event block.
+- Combine multi-line entries into a single event when logically continuous.
 
-- "duration_minutes": Calculate event duration ONLY if explicitly provided (e.g., "2-hour session").
-  - Return null if not explicitly stated.
 
-- "location": Extract the exact, complete location if explicitly mentioned.
-  - If location details are incomplete or vague, return the best available string.
-  - Return null if location is completely missing.
+🔍 FORMAT DETECTION:
+Before extracting events, first identify whether the OCR text is:
+- A **Work Schedule**: Usually includes multiple dates in sequence (e.g., "May 5", "May 6", "May 7"), role labels (e.g., "ASM", "Shift", "0.5 ASM"), consistent locations, and possibly "Day Off".
+- An **Event Poster**: Typically contains a single date and time, a bold or catchy title, promotional language (e.g., "Join us", "Don't miss"), and no sequential calendar structure.
 
-Guidelines for extraction accuracy:
-- Identify separate events clearly by logical boundaries such as new lines, clear separation marks, dates, or contextual changes.
-- Pay close attention to the format and logical flow of typical calendar event details.
-- Do NOT fabricate details or infer beyond logical certainty.
-- Avoid duplication: merge details confidently identified as referring to the same event.
+Your task:
+1. **If it's a work schedule**, extract each individual shift as a separate calendar event (excluding "Day Off").
+2. **If it's an event poster**, extract only one calendar event using the most prominent title, date, time, and location.
 
-OCR Text:
-${truncatedText}
+Ignore header/footer noise. Focus only on event-worthy data.
 
-Return ONLY a structured JSON array like this example:
+✅ Output format:
+Return a pure JSON array like this:
+
 [
   {
-    "title": "Team Meeting",
-    "date": "2025-05-03",
-    "start_time": "13:00",
-    "location": "Room 403, Building A"
+    "title": "2.0 ASM",
+    "date": "2025-04-14",
+    "start_time": "09:56",
+    "location": "775167 Cheltenham Grovefield Way"
+  },
+  {
+    "title": "2.0 ASM",
+    "date": "2025-04-16",
+    "start_time": "11:57",
+    "location": "775167 Cheltenham Grovefield Way"
   }
 ]
 
-Do NOT include any explanations, only pure JSON. If no events found, return an empty array [].
+⛔ Do NOT return any other fields.
+⛔ Do NOT include explanation or markdown.
+⛔ If time or location is not clearly present, use null for that field.
+
+---
+
+OCR Text:
+${truncatedText}
 ''';
+
 
 
     int retries = 0;

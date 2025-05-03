@@ -51,8 +51,6 @@ Future<Map<String, dynamic>> extractTextAndStructureFromImage(File imageFile, St
     final bytes = await imageFile.readAsBytes();
     final base64Image = base64Encode(bytes);
 
-    // Request both TEXT_DETECTION and DOCUMENT_TEXT_DETECTION
-    // DOCUMENT_TEXT_DETECTION provides more structured information with paragraphs and blocks
     final response = await http.post(
       Uri.parse('https://vision.googleapis.com/v1/images:annotate?key=$apiKey'),
       headers: {"Content-Type": "application/json"},
@@ -114,22 +112,25 @@ Future<Map<String, dynamic>> extractTextAndStructureFromImage(File imageFile, St
         // Extract structured elements (if available)
         if (fullTextAnnotation['pages'] != null && fullTextAnnotation['pages'].isNotEmpty) {
           // Extract blocks
-          for (var block in fullTextAnnotation['pages'][0]['blocks'] ?? []) {
+          final sortedBlocks = [...fullTextAnnotation['pages'][0]['blocks']]..sort((a, b) => _compareBoundingBoxes(a['boundingBox'], b['boundingBox']));
+
+          for (var block in sortedBlocks) {
             final Map<String, dynamic> blockData = {
-              'text': _getTextFromBlock(block),
+              'text': '',
               'boundingBox': block['boundingBox'],
-              'paragraphs': <Map<String, dynamic>>[]
+              'paragraphs': <Map<String, dynamic>>[],
             };
 
-            // Extract paragraphs within the block
-            for (var paragraph in block['paragraphs'] ?? []) {
+            final sortedParagraphs = [...block['paragraphs'] ?? []]..sort((a, b) => _compareBoundingBoxes(a['boundingBox'], b['boundingBox']));
+            final StringBuffer blockTextBuffer = StringBuffer();
+
+            for (var paragraph in sortedParagraphs) {
               final Map<String, dynamic> paragraphData = {
                 'text': _getTextFromParagraph(paragraph),
                 'boundingBox': paragraph['boundingBox'],
                 'words': <Map<String, dynamic>>[],
               };
 
-              // Extract words within the paragraph
               for (var word in paragraph['words'] ?? []) {
                 final String wordText = _getTextFromWord(word);
                 if (wordText.isNotEmpty) {
@@ -142,10 +143,23 @@ Future<Map<String, dynamic>> extractTextAndStructureFromImage(File imageFile, St
 
               blockData['paragraphs'].add(paragraphData);
               result['paragraphs'].add(paragraphData);
+
+              if (blockTextBuffer.isNotEmpty) blockTextBuffer.write('\n');
+              blockTextBuffer.write(paragraphData['text']);
             }
 
+            blockData['text'] = blockTextBuffer.toString();
             result['blocks'].add(blockData);
           }
+          // Rebuild rawText from all block texts in order
+          final StringBuffer fullTextBuffer = StringBuffer();
+          for (var b in result['blocks']) {
+            if (b['text'] != null && b['text'].toString().trim().isNotEmpty) {
+              fullTextBuffer.write(b['text']);
+              fullTextBuffer.write('\n\n');
+            }
+          }
+          result['rawText'] = fullTextBuffer.toString().trim();
         }
       }
 
@@ -189,6 +203,63 @@ Future<Map<String, dynamic>> processImageForEvent(File imageFile, String apiKey)
     'rawExtraction': extractionResult,
     'eventData': eventData,
   };
+}
+
+/// Enhanced image processing with automatic format detection
+Future<Map<String, dynamic>> processImageWithFormatDetection(File imageFile, String apiKey) async {
+  // Step 1: Extract full structured data
+  final extractionResult = await extractTextAndStructureFromImage(imageFile, apiKey);
+  final String rawText = extractionResult['rawText'] ?? '';
+
+  // Step 2: Detect document format type
+  DocumentFormat format = detectDocumentFormat(rawText, extractionResult);
+
+  // Step 3: Apply format-specific parsing
+  Map<String, dynamic> parsedData;
+  switch (format) {
+    case DocumentFormat.workSchedule:
+      parsedData = _parseWorkScheduleFormat(rawText.split('\n')); // Reuse existing function
+      break;
+    case DocumentFormat.eventPoster:
+      parsedData = _parseEventPosterFormat(rawText.split('\n')); // Reuse existing function
+      break;
+    default:
+      parsedData = _parseGenericEventFormat(rawText.split('\n'), extractionResult); // Reuse existing function
+  }
+
+  return {
+    'rawText': rawText,
+    'format': format.toString().split('.').last,
+    'structuredData': extractionResult,
+    'parsedData': parsedData,
+    'confidence': parsedData['confidence'] ?? 0.0,
+  };
+}
+
+/// Document format types for classification
+enum DocumentFormat { workSchedule, eventPoster, generic }
+
+/// Detect document format based on content patterns
+DocumentFormat detectDocumentFormat(String text, Map<String, dynamic> structured) {
+  // Check for work schedule indicators
+  bool hasShiftPattern = RegExp(r'\b(\d+\.\d+\s+ASM|Day\s+Off)\b').hasMatch(text);
+  bool hasDateDayPattern = RegExp(r'\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\b').hasMatch(text);
+  bool hasTimeRangePattern = RegExp(r'\d{2}:\d{2}\s*[-–]\s*\d{2}:\d{2}').hasMatch(text);
+
+  if ((hasShiftPattern && hasDateDayPattern) || (hasShiftPattern && hasTimeRangePattern)) {
+    return DocumentFormat.workSchedule;
+  }
+
+  // Check for event poster indicators
+  bool hasEventWords = RegExp(r'\b(event|concert|festival|show|exhibition|performance)\b', caseSensitive: false).hasMatch(text);
+  bool hasDateTimePattern = RegExp(r'\b(at|from|starts)\s+\d{1,2}(:\d{2})?\s*(am|pm|AM|PM)\b').hasMatch(text);
+  bool hasLocationIndicator = RegExp(r'\b(venue|location|place|theater|arena|hall)\b', caseSensitive: false).hasMatch(text);
+
+  if ((hasEventWords && hasDateTimePattern) || (hasEventWords && hasLocationIndicator)) {
+    return DocumentFormat.eventPoster;
+  }
+
+  return DocumentFormat.generic;
 }
 
 /// Enhanced function to extract structured data from the OCR text
@@ -688,6 +759,8 @@ String _getTextFromParagraph(Map<String, dynamic> paragraph) {
   return buffer.toString();
 }
 
+
+
 // Helper function to extract text from a word
 String _getTextFromWord(Map<String, dynamic> word) {
   final StringBuffer buffer = StringBuffer();
@@ -701,6 +774,21 @@ String _getTextFromWord(Map<String, dynamic> word) {
   }
 
   return buffer.toString();
+}
+
+int _compareBoundingBoxes(Map boxA, Map boxB) {
+  final aY = (boxA['vertices']?[0]?['y'] ?? 0) as int;
+  final bY = (boxB['vertices']?[0]?['y'] ?? 0) as int;
+
+  // Prioritize top-to-bottom sorting
+  if ((aY - bY).abs() > 10) {
+    return aY.compareTo(bY);
+  }
+
+  final aX = (boxA['vertices']?[0]?['x'] ?? 0) as int;
+  final bX = (boxB['vertices']?[0]?['x'] ?? 0) as int;
+
+  return aX.compareTo(bX); // If vertically close, sort left-to-right
 }
 
 // Function to detect dates, times, and locations from extracted text

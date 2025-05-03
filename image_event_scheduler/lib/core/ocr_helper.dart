@@ -73,25 +73,36 @@ class OCRHelper {
     }
   }
 
-  /// Process an image and extract event information, potentially multiple events
+/// Process an image and extract event information, potentially multiple events
   static Future<List<EventModel>> processEventImage(File image, {bool detectMultiple = true}) async {
     List<EventModel> detectedEvents = [];
     String textToParse = '';
     Map<String, dynamic>? structuredData;
 
     try {
-      // Step 1: Extract text (prefer structured if available)
-      structuredData = await extractStructuredText(image);
-      if (structuredData['success'] == true && structuredData['rawText'] != null && structuredData['rawText'].isNotEmpty) {
-        textToParse = structuredData['rawText'];
-      } else {
-        textToParse = await extractTextOnly(image);
-        structuredData = null;
-      }
+
+      print('Starting event image processing...');
+      // Step 1: Use the new format detection functionality
+      final formatDetectionResult = await processImageWithFormatDetection(image, Config.visionApiKey);
+
+      // Extract the information from the result
+      textToParse = formatDetectionResult['rawText'] ?? '';
+      structuredData = formatDetectionResult['structuredData'];
+      final documentFormat = formatDetectionResult['format'];
+      final parsedData = formatDetectionResult['parsedData'];
 
       if (textToParse.isEmpty) {
         print('No text extracted from image.');
         return [_createDefaultEvent("No text found in image.")];
+      }
+
+      // Use the parsed data based on format detection
+      if (parsedData != null && parsedData.isNotEmpty) {
+        // Convert parsedData to EventModel
+        final EventModel event = _convertParsedDataToEventModel(parsedData, documentFormat);
+        if (event.title.isNotEmpty && event.title != "Untitled Event") {
+          return [event];
+        }
       }
 
       // Step 2: Extract multiple events using hybrid parser
@@ -213,6 +224,35 @@ class OCRHelper {
       'times': times,
       'locations': locations,
     };
+  }
+
+  // Helper to convert parsed data from format detection to EventModel
+  static EventModel _convertParsedDataToEventModel(Map<String, dynamic> parsedData, String format) {
+    EventModel event = EventModel(
+      title: parsedData['title'] ?? "Untitled Event",
+      location: parsedData['location'] ?? "Location TBD",
+      description: parsedData['description'] ?? "",
+    );
+
+    // Handle date
+    if (parsedData['date'] != null) {
+      try {
+        event.date = DateTime.parse(parsedData['date']);
+      } catch (e) {
+        print('Error parsing date: $e');
+      }
+    }
+
+    // Handle time
+    if (parsedData['startTime'] != null) {
+      try {
+        event.time = _parseTimeOfDay(parsedData['startTime']);
+      } catch (e) {
+        print('Error parsing time: $e');
+      }
+    }
+
+    return event;
   }
 
   // Helper to parse TimeOfDay robustly
