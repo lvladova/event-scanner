@@ -23,6 +23,10 @@ dependencies:
   timezone: ^0.9.4
   google_fonts: ^4.0.4
   flutter_svg: ^2.0.5
+  # Maps and Location
+  google_maps_flutter: ^2.5.3
+  location: ^5.0.3
+  geocoding: ^2.1.1
 
 dev_dependencies:
   flutter_launcher_icons: ^0.13.1

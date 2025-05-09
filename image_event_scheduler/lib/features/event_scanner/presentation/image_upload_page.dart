@@ -14,6 +14,8 @@ import 'package:image_event_scheduler/shared/theme/futuristic_theme.dart';
 import 'package:image_event_scheduler/shared/widgets/futuristic_widgets.dart';
 import 'package:image_event_scheduler/shared/widgets/futuristic_animations.dart';
 import 'package:flutter/services.dart';
+import '../../../../core/calendar_helper.dart';
+import 'package:intl/intl.dart';
 
 import 'widgets/multi_event_detection_modal.dart';
 import 'widgets/detected_events_card.dart';
@@ -286,6 +288,12 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
         _selectedEventIndices.remove(index);
       }
     });
+  }
+
+  // Helper method to open event in calendar app
+  void _openEventInCalendar(Map<String, dynamic> event) {
+    // Use the CalendarHelper class to handle calendar navigation
+    CalendarHelper.openEventInCalendar(event);
   }
 
   @override
@@ -569,23 +577,39 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
     );
   }
 
+  // Wrapper for the upcoming events section
   Widget _buildUpcomingEventsSection() {
-    return Container(
-      margin: const EdgeInsets.only(top: 32, bottom: 16),
+    return Padding(
+      padding: const EdgeInsets.only(top: 32.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
+          const Text(
+            'UPCOMING EVENTS',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Colors.white70,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildUpcomingEvents(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUpcomingEvents() {
+    return Container(
+      margin: const EdgeInsets.only(top: 20, bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Row(
             children: [
               const Text(
                 'UPCOMING EVENTS',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white70,
-                  letterSpacing: 1.2,
-                ),
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white70),
               ),
               const Spacer(),
               IconButton(
@@ -595,31 +619,11 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
               ),
             ],
           ),
-
           const SizedBox(height: 12),
-
-          // Loading indicator or events list
           _loadingEvents
-              ? const Center(
-            child: Padding(
-              padding: EdgeInsets.all(16.0),
-              child: CircularProgressIndicator(),
-            ),
-          )
+              ? const Center(child: CircularProgressIndicator())
               : _upcomingEvents.isEmpty
-              ? Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: FuturisticTheme.softBlue,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Center(
-              child: Text(
-                'You have no upcoming events',
-                style: TextStyle(color: Colors.white70),
-              ),
-            ),
-          )
+              ? const Center(child: Text('No upcoming events'))
               : ListView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -631,41 +635,74 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
                   : null;
 
               return Container(
-                margin: const EdgeInsets.only(bottom: 8),
+                margin: const EdgeInsets.only(bottom: 10),
                 decoration: BoxDecoration(
-                  color: FuturisticTheme.softBlue,
-                  borderRadius: BorderRadius.circular(8),
+                  color: const Color(0xFF1E2D3C),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: ListTile(
-                  title: Text(
-                    event['summary'] ?? 'Untitled Event',
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    startTime != null
-                        ? '${startTime.month}/${startTime.day}/${startTime.year} ${startTime.hour}:${startTime.minute.toString().padLeft(2, '0')}'
-                        : 'No date specified',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: FuturisticTheme.primaryBlue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                child: Stack(
+                  children: [
+                    // Event content
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          // Event icon
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.event, color: Colors.blue),
+                          ),
+                          const SizedBox(width: 16),
+                          // Event details
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  event['summary'] ?? 'Untitled Event',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                if (startTime != null)
+                                  Text(
+                                    DateFormat('MM/dd/yyyy h:mm').format(startTime),
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.event,
-                      color: Colors.blue,
-                      size: 20,
+
+                    // Calendar redirection button in top-right corner
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.open_in_new,
+                          size: 20,
+                          color: Color(0xFF00B4FF),
+                        ),
+                        onPressed: () {
+                          // Open this event in the default calendar app
+                          _openEventInCalendar(event);
+                        },
+                        tooltip: 'Open in calendar',
+                      ),
                     ),
-                  ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.open_in_new, size: 18),
-                    onPressed: () => CalendarService.openEventInCalendar(event['htmlLink']),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  ],
                 ),
               );
             },

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../domain/event_model.dart';
-import '../../../../shared/theme/futuristic_theme.dart';
-import '../../../../shared/widgets/futuristic_widgets.dart';
+import '../../../shared/theme/futuristic_theme.dart';
+import '../../../shared/widgets/futuristic_widgets.dart';
+import '../../../screens/map_screen.dart';
 
 class EventDetailsCard extends StatelessWidget {
   final EventModel event;
@@ -28,7 +29,7 @@ class EventDetailsCard extends StatelessWidget {
             children: [
               const Icon(Icons.event_note, color: Colors.blue),
               const SizedBox(width: 8),
-              const Expanded(  // Added Expanded to prevent overflow
+              const Expanded(
                 child: Text(
                   'Event Details',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
@@ -46,11 +47,11 @@ class EventDetailsCard extends StatelessWidget {
 
           // Title
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),  // Added padding
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Text(
               event.title,
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              maxLines: 2,  // Allow two lines for title
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -90,21 +91,36 @@ class EventDetailsCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
 
-          // Location
+          // Location with Map Button
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,  // Better for multiline text
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Icon(Icons.location_on, size: 16, color: Colors.blue),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     event.location,
-                    maxLines: 2,  // Allow multiple lines for location
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                if (event.location != "Location TBD")
+                  IconButton(
+                    icon: const Icon(Icons.map, color: Colors.blue),
+                    tooltip: 'View on Map',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => MapScreen(
+                            locationQuery: event.location,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
               ],
             ),
           ),
@@ -154,7 +170,7 @@ class EventDetailsCard extends StatelessWidget {
         children: [
           Icon(icon, size: 16, color: Colors.blue),
           const SizedBox(width: 8),
-          Expanded(  // Added Expanded to prevent overflow
+          Expanded(
             child: Text(
               text,
               maxLines: 1,
@@ -187,10 +203,10 @@ class EventDetailsCard extends StatelessWidget {
       onPressed: isScheduling ? null : onSchedule,
       icon: isScheduling
           ? const SizedBox(
-        width: 16,
-        height: 16,
-        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-      )
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            )
           : const Icon(Icons.calendar_month),
       label: Text(
         isScheduling ? 'Scheduling...' : 'Schedule',

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../features/event_scanner/domain/event_model.dart';
+import '../shared/widgets/map_button.dart';
 
 class EventDetailsScreen extends StatefulWidget {
   final EventModel event;
@@ -266,13 +267,25 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             ),
 
             // Location
-            Text(
-              'LOCATION',
-              style: TextStyle(
-                color: Colors.blue[300],
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'LOCATION',
+                  style: TextStyle(
+                    color: Colors.blue[300],
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                // Map button (shows only if there's a valid location)
+                if (_locationController.text.isNotEmpty &&
+                    _locationController.text != "Location TBD")
+                  MapButton(
+                    location: _locationController.text,
+                    miniSize: true,
+                  ),
+              ],
             ),
             Container(
               margin: const EdgeInsets.only(top: 8, bottom: 16),
@@ -324,6 +337,14 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                 ),
               ),
             ),
+
+            // View on Map button (larger button below description)
+            if (_locationController.text.isNotEmpty &&
+                _locationController.text != "Location TBD")
+              MapButton(
+                location: _locationController.text,
+                padding: const EdgeInsets.only(bottom: 16),
+              ),
           ],
         ),
       ),
@@ -339,15 +360,15 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
         child: ElevatedButton(
           onPressed: _saveEvent,
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
+              backgroundColor: Colors.blue,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
               foregroundColor: Colors.white
           ),
           child: const Text(
-            'SAVE DETAILS',
+            'SAVE EVENT',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
