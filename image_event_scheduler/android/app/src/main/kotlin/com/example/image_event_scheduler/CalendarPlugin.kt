@@ -49,7 +49,6 @@ class CalendarPlugin(private val context: Context) : MethodChannel.MethodCallHan
             true
         } catch (e: Exception) {
             e.printStackTrace()
-
             // Try fallback to general calendar
             openDefaultCalendar()
         }

@@ -585,7 +585,7 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'UPCOMING EVENTS',
+            '',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
