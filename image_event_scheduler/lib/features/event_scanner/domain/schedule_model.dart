@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'event_model.dart';
 
+/// A model class representing a schedule of events.
 class ScheduleModel {
   final String title;
   final DateTime? scheduleDate;

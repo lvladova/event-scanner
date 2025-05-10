@@ -7,6 +7,7 @@ import '../features/event_scanner/domain/services/natural_language_service.dart'
 import '../features/event_scanner/domain/services/hybrid_event_parser.dart';
 import '../config.dart';
 
+/// This class provides helper methods for Optical Character Recognition (OCR)
 class OCRHelper {
   // Initialize the Hybrid Parser
   static final _hybridParser = HybridEventParser(Config.geminiApiKey);

@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 
-
-
-// Create a new widget for image preview with zoom
+/// Create a new widget for image preview with zoom
 class ImagePreviewScreen extends StatelessWidget {
   final File image;
 

@@ -1,6 +1,3 @@
-// Here's a complete implementation of the natural_language_service.dart file
-// that includes all the improvements and handles a wide variety of event formats
-
 import 'dart:convert';
 import 'dart:math' show min;
 import 'package:http/http.dart' as http;
@@ -9,6 +6,7 @@ import 'package:flutter/material.dart' show TimeOfDay;
 import '../event_model.dart';
 import 'event_parser.dart';
 
+/// A service to extract event entities from text using Google Natural Language API
 class NaturalLanguageService {
   static const String apiBaseUrl = 'https://language.googleapis.com/v1/documents:analyzeEntities';
 

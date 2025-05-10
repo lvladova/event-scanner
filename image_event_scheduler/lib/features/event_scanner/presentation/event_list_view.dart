@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../domain/event_model.dart';
 import 'package:intl/intl.dart';
 
+/// A widget that displays a list of events with options to select, edit, schedule, and delete them.
 class EventListView extends StatelessWidget {
   final List<EventModel> events;
   final EventModel? selectedEvent;

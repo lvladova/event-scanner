@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+/// A widget that displays OCR information in a card format.
 class OCRInfoCard extends StatelessWidget {
   final String ocrText;
 

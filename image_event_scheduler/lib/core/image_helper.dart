@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
+/// A helper class to handle image picking from the gallery or camera.
 class ImageHelper {
   static final ImagePicker _picker = ImagePicker();
 

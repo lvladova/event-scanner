@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_event_scheduler/features/event_scanner/domain/event_model.dart';
 import 'package:image_event_scheduler/shared/theme/futuristic_theme.dart';
 
+/// A card widget that displays a list of detected events with options to edit and schedule them.
 class DetectedEventsCard extends StatelessWidget {
   final List<EventModel> events;
   final Function(EventModel) onEditEvent;

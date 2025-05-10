@@ -1,9 +1,9 @@
-// lib/screens/event_details_screen.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../features/event_scanner/domain/event_model.dart';
 import '../shared/widgets/map_button.dart';
 
+/// A screen that displays and allows editing of event details.
 class EventDetailsScreen extends StatefulWidget {
   final EventModel event;
   final Function(EventModel) onSave;

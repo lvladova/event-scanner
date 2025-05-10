@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+/// A screen for app settings and preferences.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
 

@@ -1,10 +1,10 @@
-// lib/features/event_scanner/presentation/multi_event_selection_screen.dart
 import 'package:flutter/material.dart';
 import '../domain/event_model.dart';
 import '../domain/schedule_model.dart';
 import '../domain/services/calendar_service.dart';
 import 'package:image_event_scheduler/shared/theme/futuristic_theme.dart';
 
+/// A screen that allows users to select multiple events from a schedule.
 class MultiEventSelectionScreen extends StatefulWidget {
   final ScheduleModel schedule;
   final Function(List<EventModel>) onEventsSelected;

@@ -1,5 +1,5 @@
 name: image_event_scheduler
-description: "A new Flutter project."
+description: "AI-driven image recognition for event scheduling"
 publish_to: 'none'
 
 version: 1.0.0+1

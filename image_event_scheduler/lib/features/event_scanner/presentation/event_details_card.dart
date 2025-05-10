@@ -4,6 +4,7 @@ import '../../../shared/theme/futuristic_theme.dart';
 import '../../../shared/widgets/futuristic_widgets.dart';
 import '../../../screens/map_screen.dart';
 
+/// A card widget that displays the details of an event with options to edit and schedule it.
 class EventDetailsCard extends StatelessWidget {
   final EventModel event;
   final VoidCallback onEdit;

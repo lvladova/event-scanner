@@ -2,6 +2,7 @@ import 'package:intl/intl.dart';
 import '../event_model.dart';
 import 'package:flutter/material.dart' show TimeOfDay;
 
+/// EventParser class to handle parsing of event details from OCR text
 class EventParser {
   /// Parse raw OCR text into structured event information
   static EventModel parseEventDetails(String ocrText) {

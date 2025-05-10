@@ -4,6 +4,7 @@ import 'event_parser.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
 
+/// This class is responsible for parsing the schedule from OCR text and structured data
 class ScheduleParser {
   static ScheduleModel parseSchedule(String ocrText, Map<String, dynamic> visionResponse) {
     try {
@@ -390,7 +391,6 @@ class ScheduleParser {
         int j = i + 1;
 
         // Collect lines that are part of this event
-        // (until we hit another line that looks like an event start)
         while (j < lines.length && !isLikelyEventStart(lines[j])) {
           eventText += '\n' + lines[j];
           j++;

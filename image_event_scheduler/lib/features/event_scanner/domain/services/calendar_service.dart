@@ -6,6 +6,7 @@ import 'package:timezone/data/latest.dart' as tz_data;
 import '../event_model.dart';
 import 'dart:io' show Platform;
 
+/// A service class to handle calendar-related operations
 class CalendarService {
   static final DeviceCalendarPlugin _deviceCalendarPlugin = DeviceCalendarPlugin();
 
@@ -304,8 +305,6 @@ static Future<void> openEventInCalendar(String? eventUrl) async {
     }
   } catch (e) {
     print('Error opening calendar event: $e');
-    // Show a user-friendly message instead of throwing an exception
-    // You could use a SnackBar or Toast here
   }
 }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+/// A helper class to show a dialog for retrying OCR or entering event details manually.
 class DialogHelper {
   static void showRetryDialog(BuildContext context, VoidCallback onManualEntry, VoidCallback onRetry) {
     showDialog(

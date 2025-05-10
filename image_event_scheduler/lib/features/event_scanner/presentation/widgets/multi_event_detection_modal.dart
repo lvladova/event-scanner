@@ -3,6 +3,7 @@ import 'package:image_event_scheduler/shared/widgets/futuristic_widgets.dart';
 import 'package:image_event_scheduler/features/event_scanner/domain/event_model.dart';
 import 'package:image_event_scheduler/shared/theme/futuristic_theme.dart';
 
+/// A modal dialog for selecting multiple detected events.
 class MultiEventDetectionModal extends StatefulWidget {
   final List<EventModel> detectedEvents;
   final Function(EventModel) onSelectSingle;

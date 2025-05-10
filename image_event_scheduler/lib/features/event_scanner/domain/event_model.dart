@@ -1,7 +1,7 @@
-// lib/models/event_model.dart
 import 'package:intl/intl.dart';
 import 'package:flutter/material.dart' show TimeOfDay;
 
+/// A model class representing an event with its details.
 class EventModel {
   String title;
   DateTime? date;

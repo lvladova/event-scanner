@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 
+/// A collection of futuristic-themed widgets for a unique UI experience.
 class FuturisticWidgets {
   // Holographic Card
   static Widget holographicCard({

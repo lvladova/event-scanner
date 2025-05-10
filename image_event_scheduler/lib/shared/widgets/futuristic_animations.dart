@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 
+/// A collection of futuristic animations and effects for Flutter applications.
 class FuturisticAnimations {
   // Holographic Scanning Animation
   static Widget holographicScanner({

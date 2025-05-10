@@ -4,6 +4,7 @@ import '../features/event_scanner/domain/event_model.dart';
 import '../features/event_scanner/domain/services/calendar_service.dart';
 import 'package:flutter/services.dart';
 
+/// This class provides helper methods for creating and scheduling events
 class EventHelper {
   static EventModel createBlankEvent() {
     return EventModel(

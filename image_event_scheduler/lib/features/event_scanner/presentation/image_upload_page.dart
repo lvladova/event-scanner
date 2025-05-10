@@ -20,6 +20,7 @@ import 'package:intl/intl.dart';
 import 'widgets/multi_event_detection_modal.dart';
 import 'widgets/detected_events_card.dart';
 
+/// This page allows users to upload an image of an event and extract event details using OCR.
 class ImageUploadPage extends StatefulWidget {
   const ImageUploadPage({Key? key}) : super(key: key);
 
@@ -124,7 +125,7 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
       DialogHelper.showRetryDialog(context, _createBlankEvent, _startOCR);
     }
   }
-
+  /// Show a modal dialog to let the user select multiple detected events
   void _showMultiEventDetectionModal(List<EventModel> events) {
     showDialog(
       context: context,
@@ -150,7 +151,7 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
       },
     );
   }
-
+/// Create a blank event if no events are detected
   void _createBlankEvent() {
     setState(() {
       _detectedEvents = [EventHelper.createBlankEvent()];
@@ -159,7 +160,7 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
     });
     _navigateToEventDetails(_detectedEvents[0]);
   }
-
+/// Navigate to the event details screen
   void _navigateToEventDetails(EventModel event) {
     FocusScope.of(context).unfocus();
 
@@ -188,7 +189,7 @@ class _ImageUploadPageState extends State<ImageUploadPage> {
       );
     });
   }
-
+/// Schedule a single event
   Future<void> _scheduleEvent(EventModel event) async {
     if (event.date == null || event.time == null) {
       ScaffoldMessenger.of(context).showSnackBar(

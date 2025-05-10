@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+/// A futuristic theme for the app, inspired by the aesthetics of sci-fi movies and games.
 class FuturisticTheme {
   // Color Palette
   static const Color backgroundDark = Color(0xFF0A0A1A);
